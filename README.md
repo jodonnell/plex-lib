@@ -19,10 +19,16 @@ PLEX_API_TOKEN=your-token npm start
 ## Dump library metadata
 
 ```sh
-PLEX_API_TOKEN=your-token npm run dump:metadata > plex-metadata.json
+PLEX_API_TOKEN=your-token PLEX_DUMP_OUTPUT=plex-metadata.json npm run dump:metadata
 ```
 
 The dump writes JSON to stdout and progress to stderr. It discovers the first available Plex server, reads all movie and TV show sections, and includes the raw full title metadata returned by Plex for each item.
+If you prefer shell redirection, use `npm --silent run dump:metadata > plex-metadata.json` so npm's run-script banner does not get captured before the JSON.
+For a smaller dump with only basic normalized item fields, use:
+
+```sh
+PLEX_API_TOKEN=your-token PLEX_DUMP_OUTPUT=plex-metadata-short.json npm run dump:metadata:short
+```
 
 Optional filters:
 
@@ -32,6 +38,7 @@ PLEX_API_TOKEN=your-token PLEX_SERVER_URI="http://127.0.0.1:32400" npm run dump:
 PLEX_API_TOKEN=your-token PLEX_SECTION_ID=1 npm run dump:metadata
 PLEX_API_TOKEN=your-token PLEX_DUMP_OUTPUT=plex-metadata.json npm run dump:metadata
 PLEX_API_TOKEN=your-token PLEX_DUMP_FULL=0 npm run dump:metadata
+PLEX_API_TOKEN=your-token PLEX_DUMP_SHORT=1 npm run dump:metadata
 ```
 
 ## Notes

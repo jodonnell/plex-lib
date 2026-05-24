@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dump:metadata": "node scripts/dump-library-metadata.js",
+    "dump:metadata:short": "PLEX_DUMP_SHORT=1 node scripts/dump-library-metadata.js",
     "check": "node --check server.js && node --check scripts/dump-library-metadata.js && node --check src/plex.js"
   },
   "engines": {

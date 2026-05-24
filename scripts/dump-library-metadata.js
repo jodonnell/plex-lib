@@ -18,6 +18,8 @@ const outputPath = process.env.PLEX_DUMP_OUTPUT?.trim() || "";
 const pageSize = Number(process.env.PLEX_DUMP_PAGE_SIZE || DEFAULT_PAGE_SIZE);
 const detailConcurrency = Number(process.env.PLEX_DUMP_DETAIL_CONCURRENCY || DEFAULT_DETAIL_CONCURRENCY);
 const fetchFullMetadata = process.env.PLEX_DUMP_FULL !== "0";
+const short = process.env.PLEX_DUMP_SHORT === "1";
+const excludedLibraryTitles = new Set(["kids movies", "kids tv shows"]);
 
 if (!token) {
   console.error("Missing PLEX_API_TOKEN. Example: PLEX_API_TOKEN=your-token npm run dump:metadata");
@@ -41,9 +43,11 @@ async function main() {
     serverUri: requestedServerUri,
     serverName: requestedServerName,
     sectionId: requestedSectionId,
+    excludedTitles: excludedLibraryTitles,
     pageSize,
     detailConcurrency,
     fetchFullMetadata,
+    short,
     onSection: (section) => console.error(`Dumping ${section.title} (${section.type})...`),
   });
 

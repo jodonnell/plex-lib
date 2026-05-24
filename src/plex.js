@@ -32,7 +32,14 @@ export function createPlexHeaders({
 }
 
 export async function plexFetch(url, options = {}) {
-  const response = await fetch(url, options);
+  let response;
+  try {
+    response = await fetch(url, options);
+  } catch (error) {
+    const cause = error.cause?.message || error.message;
+    throw new Error(`Plex request failed for ${url}: ${cause}`);
+  }
+
   const contentType = response.headers.get("content-type") || "";
   const body = contentType.includes("json") ? await response.json() : await response.text();
 
@@ -233,6 +240,17 @@ export function selectServer(resources, { serverUri = "", serverName = "", fallb
   return { ...server, selectedConnection };
 }
 
+function orderedConnections(server) {
+  const connections = [server.selectedConnection, ...(server.connections || [])].filter(Boolean);
+  const seenUris = new Set();
+  return connections.filter((connection) => {
+    const uri = String(connection.uri || "").replace(/\/$/, "");
+    if (!uri || seenUris.has(uri)) return false;
+    seenUris.add(uri);
+    return true;
+  });
+}
+
 export async function fetchSectionItemPages({ serverUri, token, sectionId, headersForToken, pageSize = DEFAULT_PAGE_SIZE }) {
   let start = 0;
   let total = Infinity;
@@ -307,15 +325,22 @@ export async function fetchRawSectionItems({
   });
 }
 
+export async function fetchShortSectionItems({ serverUri, token, sectionId, headersForToken, pageSize = DEFAULT_PAGE_SIZE }) {
+  const pages = await fetchSectionItemPages({ serverUri, token, sectionId, headersForToken, pageSize });
+  return pages.flatMap((page) => normalizeBrowseItems(page.body, serverUri, token));
+}
+
 export async function dumpLibraryMetadata({
   token,
   headersForToken,
   serverUri: requestedServerUri = "",
   serverName: requestedServerName = "",
   sectionId = "",
+  excludedTitles = new Set(),
   pageSize = DEFAULT_PAGE_SIZE,
   detailConcurrency = DEFAULT_DETAIL_CONCURRENCY,
   fetchFullMetadata = true,
+  short = false,
   onSection,
 }) {
   const resources = requestedServerUri ? [] : await fetchResources(token, headersForToken);
@@ -324,14 +349,31 @@ export async function dumpLibraryMetadata({
     serverName: requestedServerName,
     fallbackToken: token,
   });
-  const serverUri = server.selectedConnection.uri.replace(/\/$/, "");
   const serverToken = server.accessToken || token;
-  const sections = await fetchSections({
-    serverUri,
-    token: serverToken,
-    headersForToken,
-    sectionId,
-  });
+  let serverUri = "";
+  let sections = [];
+  const connectionErrors = [];
+
+  for (const connection of orderedConnections(server)) {
+    const candidateUri = connection.uri.replace(/\/$/, "");
+    try {
+      sections = await fetchSections({
+        serverUri: candidateUri,
+        token: serverToken,
+        headersForToken,
+        excludedTitles,
+        sectionId,
+      });
+      serverUri = candidateUri;
+      break;
+    } catch (error) {
+      connectionErrors.push(`${candidateUri}: ${error.message}`);
+    }
+  }
+
+  if (!serverUri) {
+    throw new Error(`No reachable Plex server connection. Tried ${connectionErrors.join("; ")}`);
+  }
 
   const dump = {
     generatedAt: new Date().toISOString(),
@@ -347,15 +389,23 @@ export async function dumpLibraryMetadata({
     onSection?.(section);
     dump.sections.push({
       ...section,
-      items: await fetchRawSectionItems({
-        serverUri,
-        token: serverToken,
-        sectionId: section.id,
-        headersForToken,
-        pageSize,
-        fetchFullMetadata,
-        detailConcurrency,
-      }),
+      items: short
+        ? await fetchShortSectionItems({
+            serverUri,
+            token: serverToken,
+            sectionId: section.id,
+            headersForToken,
+            pageSize,
+          })
+        : await fetchRawSectionItems({
+            serverUri,
+            token: serverToken,
+            sectionId: section.id,
+            headersForToken,
+            pageSize,
+            fetchFullMetadata,
+            detailConcurrency,
+          }),
     });
   }
 
