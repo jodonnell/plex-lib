@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Plex Library Browser</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Plex Library Browser</p>
+        <h1>Movies and TV shows from your Plex account</h1>
+      </div>
+      <button id="refreshButton" class="icon-button" title="Refresh library" disabled>Refresh</button>
+    </header>
+
+    <main class="layout">
+      <section class="panel auth-panel">
+        <h2>Connect</h2>
+        <div id="signedOut" class="stack">
+          <button id="signInButton" class="primary-button">Sign in with Plex</button>
+          <div id="pinBox" class="pin-box hidden">
+            <span>Code</span>
+            <strong id="pinCode">----</strong>
+            <a id="authLink" target="_blank" rel="noreferrer">Open Plex sign in</a>
+          </div>
+          <label class="field">
+            <span>Or paste a Plex token</span>
+            <input id="tokenInput" type="password" autocomplete="off" placeholder="X-Plex-Token" />
+          </label>
+          <button id="tokenButton" class="secondary-button">Use token</button>
+        </div>
+        <div id="signedIn" class="stack hidden">
+          <p id="authDescription" class="muted">Connected locally. Your token is kept in this browser session.</p>
+          <button id="signOutButton" class="secondary-button">Sign out</button>
+        </div>
+      </section>
+
+      <section class="panel servers-panel">
+        <div class="section-heading">
+          <h2>Servers</h2>
+          <span id="serverCount" class="count">0</span>
+        </div>
+        <div id="servers" class="server-list empty">Connect to Plex to load servers.</div>
+      </section>
+
+      <section class="content">
+        <div class="library-toolbar">
+          <div>
+            <h2>Library</h2>
+            <p id="librarySummary" class="muted">No library loaded.</p>
+          </div>
+          <div class="toolbar-actions">
+            <input id="searchInput" type="search" placeholder="Search titles" disabled />
+            <select id="typeFilter" disabled>
+              <option value="all">Movies and shows</option>
+              <option value="movie">Movies</option>
+              <option value="show">TV shows</option>
+            </select>
+            <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
+          </div>
+        </div>
+        <div id="status" class="status">Ready.</div>
+        <div id="items" class="grid empty">Your Plex movies and TV shows will appear here.</div>
+      </section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

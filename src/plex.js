@@ -1,0 +1,363 @@
+import { randomUUID } from "node:crypto";
+
+export const APP_NAME = "Plex Library Browser";
+export const PRODUCT_VERSION = "0.1.0";
+export const DEFAULT_PAGE_SIZE = 200;
+export const DEFAULT_DETAIL_CONCURRENCY = 4;
+
+export function createClientId(prefix = "plex-lib") {
+  return process.env.PLEX_CLIENT_ID || `${prefix}-${randomUUID()}`;
+}
+
+export function createPlexHeaders({
+  token = "",
+  clientId,
+  platform = "Web",
+  device = "Local Browser",
+  deviceName = APP_NAME,
+} = {}) {
+  const headers = {
+    Accept: "application/json",
+    "X-Plex-Product": APP_NAME,
+    "X-Plex-Version": PRODUCT_VERSION,
+    "X-Plex-Client-Identifier": clientId,
+    "X-Plex-Platform": platform,
+    "X-Plex-Device": device,
+    "X-Plex-Device-Name": deviceName,
+    "X-Plex-Language": "en",
+  };
+
+  if (token) headers["X-Plex-Token"] = token;
+  return headers;
+}
+
+export async function plexFetch(url, options = {}) {
+  const response = await fetch(url, options);
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("json") ? await response.json() : await response.text();
+
+  if (!response.ok) {
+    const message = typeof body === "string" ? body.slice(0, 300) : JSON.stringify(body).slice(0, 300);
+    throw new Error(`Plex request failed (${response.status}) for ${url}: ${message}`);
+  }
+
+  return body;
+}
+
+export function mediaContainer(body) {
+  return body?.MediaContainer || body;
+}
+
+export function asArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function decodeXml(value) {
+  return value
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&amp;", "&");
+}
+
+function attr(xml, name) {
+  const match = xml.match(new RegExp(`${name}="([^"]*)"`, "i"));
+  return match ? decodeXml(match[1]) : "";
+}
+
+function parseResourceXml(xml) {
+  const resources = [];
+  const resourceRegex = /<Device\b([^>]*)>([\s\S]*?)<\/Device>/gi;
+  let resourceMatch;
+
+  while ((resourceMatch = resourceRegex.exec(xml))) {
+    const resourceAttrs = resourceMatch[1];
+    const body = resourceMatch[2];
+    const connections = [];
+    const connectionRegex = /<Connection\b([\s\S]*?)\/>/gi;
+    let connectionMatch;
+
+    while ((connectionMatch = connectionRegex.exec(body))) {
+      connections.push({
+        uri: attr(connectionMatch[1], "uri"),
+        address: attr(connectionMatch[1], "address"),
+        port: attr(connectionMatch[1], "port"),
+        protocol: attr(connectionMatch[1], "protocol"),
+        local: attr(connectionMatch[1], "local") === "1",
+        relay: attr(connectionMatch[1], "relay") === "1",
+      });
+    }
+
+    resources.push({
+      name: attr(resourceAttrs, "name"),
+      product: attr(resourceAttrs, "product"),
+      provides: attr(resourceAttrs, "provides"),
+      clientIdentifier: attr(resourceAttrs, "clientIdentifier"),
+      owned: attr(resourceAttrs, "owned") === "1",
+      accessToken: attr(resourceAttrs, "accessToken"),
+      connections,
+    });
+  }
+
+  return resources;
+}
+
+export function normalizeResources(body, { fallbackToken = "" } = {}) {
+  const rawResources = typeof body === "string" ? parseResourceXml(body) : body;
+  const resources = Array.isArray(rawResources) ? rawResources : asArray(mediaContainer(rawResources)?.Device);
+
+  return resources
+    .filter((resource) => String(resource.provides || "").includes("server"))
+    .map((resource) => {
+      const connections = Array.isArray(resource.connections)
+        ? resource.connections
+        : Array.isArray(resource.Connection)
+          ? resource.Connection
+          : [];
+
+      return {
+        name: resource.name,
+        product: resource.product,
+        provides: resource.provides,
+        clientIdentifier: resource.clientIdentifier,
+        owned: Boolean(resource.owned === true || resource.owned === "1"),
+        accessToken: resource.accessToken || fallbackToken,
+        connections: connections.map((connection) => ({
+          uri: connection.uri,
+          address: connection.address,
+          port: connection.port,
+          protocol: connection.protocol,
+          local: Boolean(connection.local === true || connection.local === "1"),
+          relay: Boolean(connection.relay === true || connection.relay === "1"),
+        })),
+      };
+    })
+    .filter((resource) => resource.connections.length);
+}
+
+export function normalizeSections(body, { excludedTitles = new Set(), sectionId = "" } = {}) {
+  return asArray(mediaContainer(body)?.Directory)
+    .filter((section) => section.type === "movie" || section.type === "show")
+    .filter((section) => !sectionId || String(section.key) === sectionId)
+    .filter((section) => !excludedTitles.has(String(section.title || "").trim().toLowerCase()))
+    .map((section) => ({
+      id: String(section.key),
+      key: section.key,
+      title: section.title,
+      type: section.type,
+      count: Number(section.count || 0),
+    }));
+}
+
+export function externalGuid(item, source) {
+  const prefix = `${source}://`;
+  const guid = String(item.guid || "");
+  if (guid.startsWith(prefix)) return guid.slice(prefix.length);
+
+  return (
+    asArray(item.Guid)
+      .map((entry) => String(entry.id || ""))
+      .find((id) => id.startsWith(prefix))
+      ?.slice(prefix.length) || ""
+  );
+}
+
+export function normalizeBrowseItems(body, serverUri, token) {
+  return asArray(mediaContainer(body)?.Metadata).map((item) => ({
+    id: String(item.ratingKey || item.key || item.guid || item.title),
+    type: item.type,
+    title: item.title,
+    sortTitle: item.titleSort || item.title,
+    guid: item.guid || "",
+    imdbId: externalGuid(item, "imdb"),
+    tmdbId: externalGuid(item, "tmdb"),
+    tvdbId: externalGuid(item, "tvdb"),
+    year: item.year || "",
+    summary: item.summary || "",
+    contentRating: item.contentRating || "",
+    rating: item.audienceRating || item.rating || "",
+    addedAt: item.addedAt || "",
+    updatedAt: item.updatedAt || "",
+    leafCount: item.leafCount || "",
+    viewedLeafCount: item.viewedLeafCount || "",
+    thumb: item.thumb ? `${serverUri}${item.thumb}?X-Plex-Token=${encodeURIComponent(token)}` : "",
+    art: item.art ? `${serverUri}${item.art}?X-Plex-Token=${encodeURIComponent(token)}` : "",
+  }));
+}
+
+export async function fetchResources(token, headersForToken) {
+  return normalizeResources(
+    await plexFetch("https://plex.tv/api/resources?includeHttps=1&includeRelay=1", {
+      headers: headersForToken(token),
+    }),
+    { fallbackToken: token },
+  );
+}
+
+export async function fetchSections({ serverUri, token, headersForToken, excludedTitles, sectionId }) {
+  return normalizeSections(
+    await plexFetch(`${serverUri}/library/sections`, {
+      headers: headersForToken(token),
+    }),
+    { excludedTitles, sectionId },
+  );
+}
+
+export function selectServer(resources, { serverUri = "", serverName = "", fallbackToken = "" } = {}) {
+  const normalizedServerName = serverName.trim().toLowerCase();
+  if (serverUri) {
+    return {
+      name: serverName || serverUri,
+      accessToken: fallbackToken,
+      selectedConnection: { uri: serverUri },
+    };
+  }
+
+  const candidates = normalizedServerName
+    ? resources.filter((resource) => String(resource.name || "").toLowerCase() === normalizedServerName)
+    : resources;
+  const server = candidates[0];
+
+  if (!server) {
+    const available = resources.map((resource) => resource.name).filter(Boolean).join(", ") || "none";
+    throw new Error(`No Plex server matched. Available servers: ${available}`);
+  }
+
+  const selectedConnection =
+    server.connections.find((connection) => connection.local && !connection.relay) ||
+    server.connections.find((connection) => !connection.relay) ||
+    server.connections[0];
+
+  return { ...server, selectedConnection };
+}
+
+export async function fetchSectionItemPages({ serverUri, token, sectionId, headersForToken, pageSize = DEFAULT_PAGE_SIZE }) {
+  let start = 0;
+  let total = Infinity;
+  const pages = [];
+
+  while (start < total) {
+    const endpoint = new URL(`${serverUri}/library/sections/${encodeURIComponent(sectionId)}/all`);
+    endpoint.searchParams.set("includeGuids", "1");
+    endpoint.searchParams.set("X-Plex-Container-Start", String(start));
+    endpoint.searchParams.set("X-Plex-Container-Size", String(pageSize));
+
+    const body = await plexFetch(endpoint, {
+      headers: headersForToken(token),
+    });
+    const page = asArray(mediaContainer(body)?.Metadata);
+    pages.push({ body, items: page });
+
+    total = Number(mediaContainer(body)?.totalSize || mediaContainer(body)?.size || 0);
+    if (!page.length) break;
+    start += page.length;
+  }
+
+  return pages;
+}
+
+export async function fetchBrowseItems({ serverUri, token, sectionId, headersForToken, pageSize = DEFAULT_PAGE_SIZE }) {
+  const pages = await fetchSectionItemPages({ serverUri, token, sectionId, headersForToken, pageSize });
+  return pages.flatMap((page) => normalizeBrowseItems(page.body, serverUri, token));
+}
+
+export async function mapWithConcurrency(values, concurrency, mapper) {
+  const results = new Array(values.length);
+  const workerCount = Math.max(1, Math.min(concurrency, values.length));
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < values.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(values[currentIndex], currentIndex);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, worker));
+  return results;
+}
+
+export async function fetchItemMetadata({ serverUri, token, ratingKey, headersForToken }) {
+  const endpoint = new URL(`${serverUri}/library/metadata/${encodeURIComponent(ratingKey)}`);
+  endpoint.searchParams.set("includeGuids", "1");
+
+  const body = await plexFetch(endpoint, { headers: headersForToken(token) });
+  return asArray(mediaContainer(body)?.Metadata)[0] || null;
+}
+
+export async function fetchRawSectionItems({
+  serverUri,
+  token,
+  sectionId,
+  headersForToken,
+  pageSize = DEFAULT_PAGE_SIZE,
+  fetchFullMetadata = true,
+  detailConcurrency = DEFAULT_DETAIL_CONCURRENCY,
+}) {
+  const pages = await fetchSectionItemPages({ serverUri, token, sectionId, headersForToken, pageSize });
+  const items = pages.flatMap((page) => page.items);
+  if (!fetchFullMetadata) return items;
+
+  return mapWithConcurrency(items, detailConcurrency, async (item) => {
+    if (!item.ratingKey) return item;
+    return (await fetchItemMetadata({ serverUri, token, ratingKey: item.ratingKey, headersForToken })) || item;
+  });
+}
+
+export async function dumpLibraryMetadata({
+  token,
+  headersForToken,
+  serverUri: requestedServerUri = "",
+  serverName: requestedServerName = "",
+  sectionId = "",
+  pageSize = DEFAULT_PAGE_SIZE,
+  detailConcurrency = DEFAULT_DETAIL_CONCURRENCY,
+  fetchFullMetadata = true,
+  onSection,
+}) {
+  const resources = requestedServerUri ? [] : await fetchResources(token, headersForToken);
+  const server = selectServer(resources, {
+    serverUri: requestedServerUri,
+    serverName: requestedServerName,
+    fallbackToken: token,
+  });
+  const serverUri = server.selectedConnection.uri.replace(/\/$/, "");
+  const serverToken = server.accessToken || token;
+  const sections = await fetchSections({
+    serverUri,
+    token: serverToken,
+    headersForToken,
+    sectionId,
+  });
+
+  const dump = {
+    generatedAt: new Date().toISOString(),
+    server: {
+      name: server.name,
+      clientIdentifier: server.clientIdentifier || "",
+      uri: serverUri,
+    },
+    sections: [],
+  };
+
+  for (const section of sections) {
+    onSection?.(section);
+    dump.sections.push({
+      ...section,
+      items: await fetchRawSectionItems({
+        serverUri,
+        token: serverToken,
+        sectionId: section.id,
+        headersForToken,
+        pageSize,
+        fetchFullMetadata,
+        detailConcurrency,
+      }),
+    });
+  }
+
+  return dump;
+}

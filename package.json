@@ -1,0 +1,14 @@
+{
+  "name": "plex-lib",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dump:metadata": "node scripts/dump-library-metadata.js",
+    "check": "node --check server.js && node --check scripts/dump-library-metadata.js && node --check src/plex.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
