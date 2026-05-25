@@ -605,6 +605,10 @@ async function fetchOmdbMetadata(item) {
   const response = await fetch(endpoint);
   const metadata = await response.json();
 
+  if (response.ok && metadata.Response === "False" && metadata.Error === "Movie not found!") {
+    return metadata;
+  }
+
   if (!response.ok || metadata.Response === "False") {
     throw new Error(metadata.Error || `OMDb request failed with status ${response.status}.`);
   }
