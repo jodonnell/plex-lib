@@ -644,39 +644,76 @@ async function saveCurrentLibrarySnapshot() {
   });
 }
 
-async function logFirstItemCriticScore() {
-  const firstItem = filteredItems()[0];
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+function hasPlexLibRatings(item) {
+  return Boolean(item.plexLib?.ratings);
+}
+
+async function fetchOmdbReviews() {
+  const items = filteredItems();
 
   if (!state.omdbApiKey) {
     setStatus("Save an OMDb API key first.");
     return;
   }
 
-  if (!firstItem) {
+  if (!items.length) {
     setStatus("No title to look up.");
     return;
   }
 
-  setStatus(`Fetching OMDb critic score for ${firstItem.title}...`);
-  const metadata = await fetchOmdbMetadata(firstItem);
-  const updatedItem = {
-    ...firstItem,
-    plexLib: {
-      ...(firstItem.plexLib || {}),
-      ratings: normalizeOmdbRatings(metadata.Ratings),
-    },
-  };
-  const itemIndex = state.items.findIndex(
-    (item) => item === firstItem || (firstItem.cacheKey && item.cacheKey === firstItem.cacheKey),
-  );
+  let fetchedCount = 0;
+  let skippedCount = 0;
 
-  if (itemIndex >= 0) {
-    state.items[itemIndex] = updatedItem;
-    await saveCurrentLibrarySnapshot();
+  els.logCriticScoreButton.disabled = true;
+
+  try {
+    for (const item of items) {
+      if (hasPlexLibRatings(item)) {
+        skippedCount += 1;
+        continue;
+      }
+
+      const itemIndex = state.items.findIndex(
+        (candidate) => item === candidate || (item.cacheKey && candidate.cacheKey === item.cacheKey),
+      );
+      if (itemIndex < 0) continue;
+
+      setStatus(`Fetching OMDb reviews for ${item.title} (${fetchedCount + 1} fetched, ${skippedCount} skipped)...`);
+
+      try {
+        const metadata = await fetchOmdbMetadata(item);
+        state.items[itemIndex] = {
+          ...item,
+          plexLib: {
+            ...(item.plexLib || {}),
+            ratings: normalizeOmdbRatings(metadata.Ratings),
+          },
+        };
+        fetchedCount += 1;
+        await saveCurrentLibrarySnapshot();
+        renderItems({
+          statusPrefix: `Saved OMDb reviews for ${state.items[itemIndex].title}. ${fetchedCount} fetched, ${skippedCount} skipped.`,
+        });
+      } catch (error) {
+        setStatus(
+          `Stopped fetching OMDb reviews after ${fetchedCount} fetched and ${skippedCount} skipped. ${item.title}: ${error.message}`,
+        );
+        return;
+      }
+
+      await delay(1000);
+    }
+
+    setStatus(`Finished fetching OMDb reviews. ${fetchedCount} fetched, ${skippedCount} skipped.`);
+  } finally {
+    setConnected(Boolean(state.token));
   }
-
-  console.log("OMDb critic score for first visible item:", updatedItem);
-  setStatus(`Logged critic score for ${updatedItem.title}: ${metadata.Metascore || "N/A"}.`);
 }
 
 async function signOut() {
@@ -770,7 +807,7 @@ els.metacriticStartFilter.addEventListener("change", renderItems);
 els.metacriticEndFilter.addEventListener("change", renderItems);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
 els.logCriticScoreButton.addEventListener("click", () => {
-  logFirstItemCriticScore().catch((error) => setStatus(error.message));
+  fetchOmdbReviews().catch((error) => setStatus(error.message));
 });
 
 initialize().catch((error) => setStatus(error.message));
