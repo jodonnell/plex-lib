@@ -1,6 +1,6 @@
 # Plex Library Browser
 
-A local web app that signs in to Plex, discovers your Plex Media Server resources, and lists all movie and TV show library items.
+A static web app that signs in to Plex, discovers your Plex Media Server resources, and lists all movie and TV show library items. Tokens, server discovery, and the latest loaded library snapshot are saved in this browser's IndexedDB.
 
 ## Run
 
@@ -8,12 +8,18 @@ A local web app that signs in to Plex, discovers your Plex Media Server resource
 npm start
 ```
 
-Open http://localhost:4173.
+Open the printed Vite URL.
 
-To connect automatically with an existing Plex token:
+For local development with hot reload:
 
 ```sh
-PLEX_API_TOKEN=your-token npm start
+npm run dev
+```
+
+To build static files:
+
+```sh
+npm run build
 ```
 
 ## Dump library metadata
@@ -43,7 +49,7 @@ PLEX_API_TOKEN=your-token PLEX_DUMP_SHORT=1 npm run dump:metadata
 
 ## Notes
 
-- Requires Node 18 or newer.
-- Sign in with Plex using the PIN flow, paste an existing `X-Plex-Token`, or set `PLEX_API_TOKEN`.
-- Pasted/PIN tokens stay in browser `sessionStorage` and are sent only to the local Node server. `PLEX_API_TOKEN` stays on the server.
+- Requires Node 20.19 or newer.
+- Sign in with Plex using the PIN flow or paste an existing `X-Plex-Token`.
+- Pasted/PIN tokens and library data stay in browser IndexedDB.
 - The app reads Plex libraries only. It does not modify your server.

@@ -1,9 +1,28 @@
+import {
+  createClientId,
+  createPin,
+  fetchBrowseItems,
+  fetchResources,
+  fetchSections,
+  pollPin,
+} from "./browserPlex.js";
+import {
+  clearPlexState,
+  loadAppState,
+  saveClientId,
+  saveLibrarySnapshot,
+  saveSelectedServerId,
+  saveServers,
+  saveToken,
+} from "./storage.js";
+
 const state = {
-  token: sessionStorage.getItem("plexToken") || "",
-  hasConfiguredToken: false,
+  clientId: "",
+  token: "",
   servers: [],
   selectedServer: null,
   items: [],
+  sections: [],
   polling: null,
 };
 
@@ -35,19 +54,6 @@ const els = {
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
 };
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(options.headers || {}),
-    },
-  });
-  const body = await response.json();
-  if (!response.ok || body.error) throw new Error(body.error || `Request failed: ${response.status}`);
-  return body;
-}
-
 function setStatus(message) {
   els.status.textContent = message;
 }
@@ -56,13 +62,14 @@ function activeToken() {
   return state.token || "";
 }
 
+function serverId(server) {
+  return server?.clientIdentifier || server?.name || "";
+}
+
 function setConnected(connected) {
   els.signedOut.classList.toggle("hidden", connected);
   els.signedIn.classList.toggle("hidden", !connected);
-  els.authDescription.textContent =
-    state.hasConfiguredToken && !state.token
-      ? "Connected locally using PLEX_API_TOKEN from the server environment."
-      : "Connected locally. Your token is kept in this browser session.";
+  els.authDescription.textContent = "Connected locally. Your token and library cache are kept in this browser's IndexedDB.";
   els.refreshButton.disabled = !connected;
   els.searchInput.disabled = !connected || !state.items.length;
   els.typeFilter.disabled = !connected || !state.items.length;
@@ -72,7 +79,7 @@ function setConnected(connected) {
 async function startPlexSignIn() {
   clearInterval(state.polling);
   setStatus("Creating Plex sign-in code...");
-  const pin = await api("/api/pin", { method: "POST", body: "{}" });
+  const pin = await createPin({ clientId: state.clientId });
   els.pinCode.textContent = pin.code;
   els.authLink.href = pin.authUrl;
   els.pinBox.classList.remove("hidden");
@@ -81,7 +88,7 @@ async function startPlexSignIn() {
 
   state.polling = setInterval(async () => {
     try {
-      const result = await api(`/api/pin/${pin.id}`);
+      const result = await pollPin({ pinId: pin.id, clientId: state.clientId });
       if (!result.token) return;
       clearInterval(state.polling);
       await useToken(result.token);
@@ -94,19 +101,16 @@ async function startPlexSignIn() {
 
 async function useToken(token) {
   state.token = token.trim();
-  sessionStorage.setItem("plexToken", state.token);
+  await saveToken(state.token);
   setConnected(true);
   await loadServers();
 }
 
 async function loadServers() {
   setStatus("Loading Plex servers...");
-  const result = await api("/api/resources", {
-    method: "POST",
-    body: JSON.stringify({ token: activeToken() }),
-  });
-  state.servers = result.servers || [];
+  state.servers = await fetchResources(activeToken(), state.clientId);
   state.selectedServer = null;
+  await saveServers(state.servers);
   renderServers();
 
   if (state.servers.length) {
@@ -121,12 +125,7 @@ async function loadServers() {
 }
 
 function bestConnection(server) {
-  return (
-    server.connections.find((connection) => connection.local && connection.protocol === "http") ||
-    server.connections.find((connection) => connection.local) ||
-    server.connections.find((connection) => !connection.relay) ||
-    server.connections[0]
-  );
+  return orderedConnections(server)[0];
 }
 
 function renderServers() {
@@ -134,7 +133,7 @@ function renderServers() {
 
   if (!state.servers.length) {
     els.servers.className = "server-list empty";
-    els.servers.textContent = "No servers found.";
+    els.servers.textContent = state.token ? "No servers found." : "Connect to Plex to load servers.";
     return;
   }
 
@@ -143,7 +142,7 @@ function renderServers() {
     ...state.servers.map((server) => {
       const connection = bestConnection(server);
       const button = document.createElement("button");
-      button.className = `server-button${state.selectedServer === server ? " active" : ""}`;
+      button.className = `server-button${serverId(state.selectedServer) === serverId(server) ? " active" : ""}`;
       button.type = "button";
       button.innerHTML = `
         <strong>${escapeHtml(server.name || "Unnamed server")}</strong>
@@ -157,36 +156,47 @@ function renderServers() {
 
 async function selectServer(server) {
   state.selectedServer = server;
+  await saveSelectedServerId(serverId(server));
   renderServers();
   await loadLibrary();
 }
 
 function orderedConnections(server) {
-  return [...server.connections].sort((a, b) => {
+  return [...(server.connections || [])].sort((a, b) => {
     const score = (connection) =>
-      (connection.local ? 0 : 10) + (connection.relay ? 5 : 0) + (connection.protocol === "http" ? 0 : 1);
+      (connection.local ? 0 : 10) +
+      (connection.relay ? 5 : 0) +
+      (location.protocol === "https:" && connection.protocol === "http" ? 20 : 0) +
+      (connection.protocol === "https" ? 0 : 1);
     return score(a) - score(b);
   });
 }
 
 async function loadLibrary() {
-  if (!state.selectedServer) return;
+  if (!state.selectedServer) {
+    await loadServers();
+    return;
+  }
+
   const token = state.selectedServer.accessToken || activeToken();
   const errors = [];
 
   setStatus(`Loading libraries from ${state.selectedServer.name}...`);
 
   for (const connection of orderedConnections(state.selectedServer)) {
+    const serverUri = connection.uri.replace(/\/$/, "");
     try {
-      const { sections } = await api("/api/sections", {
-        method: "POST",
-        body: JSON.stringify({ token, serverUri: connection.uri }),
+      const sections = await fetchSections({
+        token,
+        clientId: state.clientId,
+        serverUri,
+        excludedTitles: excludedLibraryTitles,
       });
 
-      await loadSectionItems(sections, token, connection.uri);
+      await loadSectionItems(sections, token, serverUri);
       return;
     } catch (error) {
-      errors.push(`${connection.uri}: ${error.message}`);
+      errors.push(`${serverUri}: ${error.message}`);
     }
   }
 
@@ -198,20 +208,35 @@ async function loadSectionItems(sections, token, serverUri) {
   const allItems = [];
   for (const section of includedSections) {
     setStatus(`Loading ${section.title}...`);
-    const { items } = await api("/api/items", {
-      method: "POST",
-      body: JSON.stringify({ token, serverUri, sectionId: section.id }),
+    const items = await fetchBrowseItems({
+      token,
+      clientId: state.clientId,
+      serverUri,
+      sectionId: section.id,
     });
     allItems.push(...items.map((item) => ({ ...item, library: section.title })));
   }
 
+  state.sections = includedSections;
   state.items = allItems.sort((a, b) => a.sortTitle.localeCompare(b.sortTitle));
-  els.searchInput.disabled = false;
-  els.typeFilter.disabled = false;
-  els.copyTitlesButton.disabled = !state.items.length;
+  await saveLibrarySnapshot({
+    generatedAt: new Date().toISOString(),
+    serverId: serverId(state.selectedServer),
+    serverName: state.selectedServer?.name || "",
+    serverUri,
+    sections: includedSections,
+    items: state.items,
+  });
+  updateLibraryControls();
   els.librarySummary.textContent = `${state.items.length.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
-  setStatus("Library loaded.");
+  setStatus("Library loaded and saved in IndexedDB.");
   renderItems();
+}
+
+function updateLibraryControls() {
+  els.searchInput.disabled = !state.items.length;
+  els.typeFilter.disabled = !state.items.length;
+  els.copyTitlesButton.disabled = !state.items.length;
 }
 
 function renderItems() {
@@ -274,12 +299,13 @@ async function copyTitles() {
   setStatus(`Copied ${titles.length.toLocaleString()} title${titles.length === 1 ? "" : "s"} to clipboard.`);
 }
 
-function signOut() {
+async function signOut() {
   clearInterval(state.polling);
-  sessionStorage.removeItem("plexToken");
+  await clearPlexState();
   state.token = "";
   state.servers = [];
   state.selectedServer = null;
+  state.sections = [];
   state.items = [];
   els.pinBox.classList.add("hidden");
   els.tokenInput.value = "";
@@ -287,19 +313,30 @@ function signOut() {
   setConnected(false);
   renderServers();
   renderItems();
-  setStatus("Signed out.");
+  setStatus("Signed out and cleared Plex data from IndexedDB.");
 }
 
 async function initialize() {
-  const config = await api("/api/config");
-  state.hasConfiguredToken = Boolean(config.hasConfiguredToken);
-  setConnected(Boolean(state.token || state.hasConfiguredToken));
+  const persisted = await loadAppState();
+  state.clientId = persisted.clientId || createClientId();
+  if (!persisted.clientId) await saveClientId(state.clientId);
 
-  if (state.token || state.hasConfiguredToken) {
-    if (state.hasConfiguredToken && !state.token) {
-      setStatus("Using PLEX_API_TOKEN from the local server environment.");
-    }
+  state.token = persisted.token;
+  state.servers = persisted.servers;
+  state.selectedServer = state.servers.find((server) => serverId(server) === persisted.selectedServerId) || null;
 
+  if (persisted.librarySnapshot?.items?.length) {
+    state.items = persisted.librarySnapshot.items;
+    state.sections = persisted.librarySnapshot.sections || [];
+    els.librarySummary.textContent = `${state.items.length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
+    setStatus(`Loaded cached library from ${new Date(persisted.librarySnapshot.generatedAt).toLocaleString()}.`);
+  }
+
+  setConnected(Boolean(state.token));
+  renderServers();
+  renderItems();
+
+  if (state.token && !state.items.length) {
     await loadServers();
   }
 }
@@ -329,7 +366,9 @@ els.tokenButton.addEventListener("click", () => {
   useToken(els.tokenInput.value).catch((error) => setStatus(error.message));
 });
 
-els.signOutButton.addEventListener("click", signOut);
+els.signOutButton.addEventListener("click", () => {
+  signOut().catch((error) => setStatus(error.message));
+});
 els.refreshButton.addEventListener("click", () => loadLibrary().catch((error) => setStatus(error.message)));
 els.searchInput.addEventListener("input", renderItems);
 els.typeFilter.addEventListener("change", renderItems);
