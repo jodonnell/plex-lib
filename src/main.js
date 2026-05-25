@@ -474,6 +474,38 @@ async function fetchOmdbMetadata(item) {
   return metadata;
 }
 
+function normalizeOmdbRatings(ratings) {
+  if (!Array.isArray(ratings)) return {};
+
+  return ratings.reduce((normalized, rating) => {
+    const source = String(rating.Source || "").toLowerCase();
+    const value = String(rating.Value || "");
+    const score = Number.parseFloat(value);
+
+    if (Number.isNaN(score)) return normalized;
+
+    if (source === "internet movie database") {
+      normalized.imdb = Math.round(score * 10);
+    } else if (source === "rotten tomatoes") {
+      normalized.rt = Math.round(score);
+    } else if (source === "metacritic") {
+      normalized.metacritic = Math.round(score);
+    }
+
+    return normalized;
+  }, {});
+}
+
+async function saveCurrentLibrarySnapshot() {
+  await saveLibrarySnapshot({
+    generatedAt: new Date().toISOString(),
+    serverId: serverId(state.selectedServer),
+    serverName: state.selectedServer?.name || "",
+    sections: state.sections,
+    items: state.items,
+  });
+}
+
 async function logFirstItemCriticScore() {
   const firstItem = filteredItems()[0];
 
@@ -489,16 +521,24 @@ async function logFirstItemCriticScore() {
 
   setStatus(`Fetching OMDb critic score for ${firstItem.title}...`);
   const metadata = await fetchOmdbMetadata(firstItem);
-  const result = {
-    title: metadata.Title || firstItem.title,
-    year: metadata.Year || firstItem.year || "",
-    imdbId: metadata.imdbID || firstItem.imdbId || "",
-    metascore: metadata.Metascore || "N/A",
-    metadata,
+  const updatedItem = {
+    ...firstItem,
+    plexLib: {
+      ...(firstItem.plexLib || {}),
+      ratings: normalizeOmdbRatings(metadata.Ratings),
+    },
   };
+  const itemIndex = state.items.findIndex(
+    (item) => item === firstItem || (firstItem.cacheKey && item.cacheKey === firstItem.cacheKey),
+  );
 
-  console.log("OMDb critic score for first visible item:", result);
-  setStatus(`Logged critic score for ${result.title}: ${result.metascore}.`);
+  if (itemIndex >= 0) {
+    state.items[itemIndex] = updatedItem;
+    await saveCurrentLibrarySnapshot();
+  }
+
+  console.log("OMDb critic score for first visible item:", updatedItem);
+  setStatus(`Logged critic score for ${updatedItem.title}: ${metadata.Metascore || "N/A"}.`);
 }
 
 async function signOut() {
