@@ -65,13 +65,60 @@ function serverId(server) {
   return server?.clientIdentifier || server?.name || "";
 }
 
+function itemCacheKey(serverKey, item) {
+  return `${serverKey}:${item.id}`;
+}
+
+function sortLibraryItems(items) {
+  return items.sort((a, b) =>
+    String(a.sortTitle || a.title || "").localeCompare(String(b.sortTitle || b.title || "")),
+  );
+}
+
+function activeLibraryItems() {
+  return state.items.filter((item) => !item.missingFromLatestScan);
+}
+
+function mergeLibraryItems({ existingItems, freshItems, serverKey, scannedAt }) {
+  const existingByKey = new Map(
+    existingItems.map((item) => {
+      const cacheKey = item.cacheKey || itemCacheKey(serverKey, item);
+      return [cacheKey, { ...item, cacheKey }];
+    }),
+  );
+  const freshKeys = new Set();
+
+  const mergedFreshItems = freshItems.map((item) => {
+    const cacheKey = itemCacheKey(serverKey, item);
+    freshKeys.add(cacheKey);
+    return {
+      ...(existingByKey.get(cacheKey) || {}),
+      ...item,
+      cacheKey,
+      missingFromLatestScan: false,
+      removedAt: "",
+    };
+  });
+
+  const missingItems = [...existingByKey.values()]
+    .filter((item) => !freshKeys.has(item.cacheKey))
+    .map((item) => ({
+      ...item,
+      missingFromLatestScan: true,
+      removedAt: item.removedAt || scannedAt,
+    }));
+
+  return sortLibraryItems([...mergedFreshItems, ...missingItems]);
+}
+
 function setConnected(connected) {
+  const hasActiveItems = Boolean(activeLibraryItems().length);
   els.signedOut.classList.toggle("hidden", connected);
   els.signedIn.classList.toggle("hidden", !connected);
   els.authDescription.textContent = "Connected locally. Your token and library cache are kept in this browser's IndexedDB.";
-  els.searchInput.disabled = !connected || !state.items.length;
-  els.typeFilter.disabled = !connected || !state.items.length;
-  els.copyTitlesButton.disabled = !connected || !state.items.length;
+  els.searchInput.disabled = !connected || !hasActiveItems;
+  els.typeFilter.disabled = !connected || !hasActiveItems;
+  els.copyTitlesButton.disabled = !connected || !hasActiveItems;
 }
 
 async function startPlexSignIn() {
@@ -214,6 +261,8 @@ async function loadLibrary() {
 async function loadSectionItems(sections, token, serverUri) {
   const includedSections = sections.filter((section) => !isExcludedLibrary(section));
   const allItems = [];
+  const scannedAt = new Date().toISOString();
+  const selectedServerId = serverId(state.selectedServer);
   for (const section of includedSections) {
     setStatus(`Loading ${section.title}...`);
     const items = await fetchBrowseItems({
@@ -226,25 +275,32 @@ async function loadSectionItems(sections, token, serverUri) {
   }
 
   state.sections = includedSections;
-  state.items = allItems.sort((a, b) => a.sortTitle.localeCompare(b.sortTitle));
+  state.items = mergeLibraryItems({
+    existingItems: state.items,
+    freshItems: allItems,
+    serverKey: selectedServerId,
+    scannedAt,
+  });
   await saveLibrarySnapshot({
-    generatedAt: new Date().toISOString(),
-    serverId: serverId(state.selectedServer),
+    generatedAt: scannedAt,
+    serverId: selectedServerId,
     serverName: state.selectedServer?.name || "",
     serverUri,
     sections: includedSections,
     items: state.items,
   });
   updateLibraryControls();
-  els.librarySummary.textContent = `${state.items.length.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
+  const activeItemCount = activeLibraryItems().length;
+  els.librarySummary.textContent = `${activeItemCount.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
   setStatus("Library loaded and saved in IndexedDB.");
   renderItems();
 }
 
 function updateLibraryControls() {
-  els.searchInput.disabled = !state.items.length;
-  els.typeFilter.disabled = !state.items.length;
-  els.copyTitlesButton.disabled = !state.items.length;
+  const hasActiveItems = Boolean(activeLibraryItems().length);
+  els.searchInput.disabled = !hasActiveItems;
+  els.typeFilter.disabled = !hasActiveItems;
+  els.copyTitlesButton.disabled = !hasActiveItems;
 }
 
 function renderItems() {
@@ -290,6 +346,7 @@ function filteredItems() {
   const query = els.searchInput.value.trim().toLowerCase();
   const type = els.typeFilter.value;
   return state.items.filter((item) => {
+    if (item.missingFromLatestScan) return false;
     const matchesType = type === "all" || item.type === type;
     const matchesQuery = !query || `${item.title} ${item.year} ${item.library}`.toLowerCase().includes(query);
     return matchesType && matchesQuery;
@@ -336,7 +393,7 @@ async function initialize() {
   if (persisted.librarySnapshot?.items?.length) {
     state.items = persisted.librarySnapshot.items;
     state.sections = persisted.librarySnapshot.sections || [];
-    els.librarySummary.textContent = `${state.items.length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
+    els.librarySummary.textContent = `${activeLibraryItems().length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
     setStatus(`Loaded cached library from ${new Date(persisted.librarySnapshot.generatedAt).toLocaleString()}.`);
   }
 
