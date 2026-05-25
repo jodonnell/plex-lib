@@ -381,6 +381,99 @@ function filteredResultStatus(filteredCount, statusPrefix = "") {
   return statusPrefix ? `${statusPrefix} ${message}` : message;
 }
 
+function formatRatingScore(score, suffix = "") {
+  const number = Number.parseFloat(score);
+  if (Number.isFinite(number)) return `${Math.round(number)}${suffix}`;
+  return "";
+}
+
+function ratingSourceKey(source) {
+  const normalized = String(source || "")
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]/g, "");
+
+  if (["internetmoviedatabase", "imdb", "imdbrating"].includes(normalized)) return "imdb";
+  if (["rottentomatoes", "rt", "tomatometer", "tomatometerallcritics"].includes(normalized)) return "rt";
+  if (["metacritic", "mc", "metascore"].includes(normalized)) return "metacritic";
+  return "";
+}
+
+function normalizedRatingFields(item) {
+  const fields = [
+    item.plexLib?.ratings,
+    item.plexLib?.Ratings,
+    item.plexLib?.Rating,
+    item.ratings,
+    item.Ratings,
+    item.Rating,
+  ].filter(Boolean);
+
+  return fields.flatMap(ratingEntries).reduce((ratings, [source, rawValue]) => {
+    const key = ratingSourceKey(source);
+    const value = Number.parseFloat(rawValue);
+    if (!key || !Number.isFinite(value)) return ratings;
+
+    ratings[key] = key === "imdb" && value <= 10 ? value * 10 : value;
+    return ratings;
+  }, {});
+}
+
+function ratingEntries(fields) {
+  if (Array.isArray(fields)) {
+    return fields.flatMap((rating) => ratingEntries(rating));
+  }
+
+  if (!fields || typeof fields !== "object") return [];
+
+  if ("Source" in fields || "source" in fields || "provider" in fields || "image" in fields || "type" in fields) {
+    return [
+      [
+        fields.Source || fields.source || fields.provider || fields.image || fields.type,
+        fields.Value || fields.value || fields.score || fields.rating,
+      ],
+    ];
+  }
+
+  return Object.entries(fields);
+}
+
+function itemRatings(item) {
+  const ratings = normalizedRatingFields(item);
+  const entries = [
+    ["IMDb", formatRatingScore(ratings.imdb)],
+    ["RT", formatRatingScore(ratings.rt, "%")],
+    ["MC", formatRatingScore(ratings.metacritic)],
+  ].filter(([, value]) => value);
+
+  const plexRating = Number(item.rating);
+  if (Number.isFinite(plexRating) && !entries.length) {
+    entries.push(["Rating", `${Math.round(plexRating * 10)}`]);
+  }
+
+  return entries;
+}
+
+function renderRatingBadges(item) {
+  const ratings = itemRatings(item);
+  if (!ratings.length) return "";
+
+  return `
+    <div class="ratings" aria-label="Ratings">
+      ${ratings
+        .map(
+          ([label, value]) => `
+            <span class="rating">
+              <span>${escapeHtml(label)}</span>
+              <strong>${escapeHtml(value)}</strong>
+            </span>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function renderItems({ statusPrefix = "" } = {}) {
   const filtered = filteredItems();
 
@@ -418,6 +511,7 @@ function renderItems({ statusPrefix = "" } = {}) {
             ${item.library ? `<span>${escapeHtml(item.library)}</span>` : ""}
             ${watched}
           </div>
+          ${renderRatingBadges(item)}
         </div>
       `;
       return card;

@@ -368,6 +368,30 @@ select {
   font-size: 0.8rem;
 }
 
+.ratings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 2px 6px;
+  color: var(--muted);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+.rating strong {
+  min-height: 0;
+  color: var(--text);
+  line-height: 1.2;
+}
+
 .badge {
   border-radius: 999px;
   background: #222;
