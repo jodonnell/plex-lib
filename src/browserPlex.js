@@ -183,6 +183,16 @@ export function posterThumbnailUrl(serverUri, thumbPath, token) {
   return endpoint.toString();
 }
 
+export function normalizeTags(tags) {
+  return asArray(tags)
+    .map((tag) => {
+      if (tag && typeof tag === "object") return tag.tag || tag.title || tag.name || "";
+      return tag;
+    })
+    .map((tag) => String(tag || "").trim())
+    .filter(Boolean);
+}
+
 export function normalizeBrowseItems(body, serverUri, token) {
   return asArray(mediaContainer(body)?.Metadata).map((item) => ({
     id: String(item.ratingKey || item.key || item.guid || item.title),
@@ -190,6 +200,8 @@ export function normalizeBrowseItems(body, serverUri, token) {
     title: item.title,
     sortTitle: item.titleSort || item.title,
     guid: item.guid || "",
+    genre: normalizeTags(item.Genre).join(", "),
+    genres: normalizeTags(item.Genre),
     imdbId: externalGuid(item, "imdb"),
     tmdbId: externalGuid(item, "tmdb"),
     tvdbId: externalGuid(item, "tvdb"),

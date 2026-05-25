@@ -59,34 +59,59 @@
             <p id="librarySummary" class="muted">No library loaded.</p>
           </div>
           <div class="toolbar-actions">
-            <input id="searchInput" type="search" placeholder="Search titles" disabled />
-            <select id="typeFilter" disabled>
-              <option value="all">Movies and shows</option>
-              <option value="movie">Movies</option>
-              <option value="show">TV shows</option>
-            </select>
-            <label class="range-filter" aria-label="Movie year range">
-              <span>Movies between:</span>
-              <select id="movieYearStartFilter" disabled>
-                <option value="">Any</option>
-              </select>
-              <span aria-hidden="true">-</span>
-              <select id="movieYearEndFilter" disabled>
-                <option value="">Any</option>
+            <label class="filter-row">
+              <span>Search</span>
+              <input id="searchInput" type="search" placeholder="Search titles" disabled />
+            </label>
+            <label class="filter-row">
+              <span>Type</span>
+              <select id="typeFilter" disabled>
+                <option value="all">Movies and shows</option>
+                <option value="movie">Movies</option>
+                <option value="show">TV shows</option>
               </select>
             </label>
-            <label class="range-filter" aria-label="Metacritic score range">
-              <span>Metacritic between:</span>
-              <select id="metacriticStartFilter" disabled>
-                <option value="">Any</option>
-              </select>
-              <span aria-hidden="true">-</span>
-              <select id="metacriticEndFilter" disabled>
-                <option value="">Any</option>
-              </select>
-            </label>
-            <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
-            <button id="logCriticScoreButton" class="secondary-button" type="button" disabled>Fetch OMDb reviews</button>
+            <div class="filter-row">
+              <span>Movie year</span>
+              <label class="range-filter" aria-label="Movie year range">
+                <select id="movieYearStartFilter" disabled>
+                  <option value="">Any</option>
+                </select>
+                <span aria-hidden="true">-</span>
+                <select id="movieYearEndFilter" disabled>
+                  <option value="">Any</option>
+                </select>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span>Metacritic</span>
+              <label class="range-filter" aria-label="Metacritic score range">
+                <select id="metacriticStartFilter" disabled>
+                  <option value="">Any</option>
+                </select>
+                <span aria-hidden="true">-</span>
+                <select id="metacriticEndFilter" disabled>
+                  <option value="">Any</option>
+                </select>
+              </label>
+            </div>
+            <div class="filter-row">
+              <span>Genre</span>
+              <details id="genreFilter" class="genre-filter">
+                <summary>
+                  <span>Genres</span>
+                  <strong id="genreFilterCount">Any</strong>
+                </summary>
+                <div class="genre-menu">
+                  <button id="genreClearButton" class="genre-clear-button" type="button">Clear</button>
+                  <div id="genreOptions" class="genre-options"></div>
+                </div>
+              </details>
+            </div>
+            <div class="toolbar-button-row">
+              <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
+              <button id="logCriticScoreButton" class="secondary-button" type="button" disabled>Fetch OMDb reviews</button>
+            </div>
           </div>
         </div>
         <div id="status" class="status">Ready.</div>

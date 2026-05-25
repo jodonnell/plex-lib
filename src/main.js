@@ -60,6 +60,10 @@ const els = {
   movieYearEndFilter: document.querySelector("#movieYearEndFilter"),
   metacriticStartFilter: document.querySelector("#metacriticStartFilter"),
   metacriticEndFilter: document.querySelector("#metacriticEndFilter"),
+  genreFilter: document.querySelector("#genreFilter"),
+  genreFilterCount: document.querySelector("#genreFilterCount"),
+  genreClearButton: document.querySelector("#genreClearButton"),
+  genreOptions: document.querySelector("#genreOptions"),
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
   logCriticScoreButton: document.querySelector("#logCriticScoreButton"),
 };
@@ -156,8 +160,15 @@ function setConnected(connected) {
   els.movieYearEndFilter.disabled = !connected || !hasActiveItems;
   els.metacriticStartFilter.disabled = !connected || !hasActiveItems;
   els.metacriticEndFilter.disabled = !connected || !hasActiveItems;
+  setGenreFilterDisabled(!connected || !hasActiveItems);
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
   els.logCriticScoreButton.disabled = !connected || !hasActiveItems;
+}
+
+function setGenreFilterDisabled(disabled) {
+  els.genreFilter.classList.toggle("is-disabled", disabled);
+  els.genreFilter.setAttribute("aria-disabled", String(disabled));
+  if (disabled) els.genreFilter.open = false;
 }
 
 async function startPlexSignIn() {
@@ -338,6 +349,7 @@ async function loadSectionItems(sections, token, serverUri) {
   updateLibraryControls();
   updateMovieYearFilters();
   updateMetacriticFilters();
+  updateGenreFilters();
   const activeItemCount = activeLibraryItems().length;
   els.librarySummary.textContent = `${activeItemCount.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
   renderItems({ statusPrefix: "Library loaded and saved in IndexedDB." });
@@ -351,8 +363,65 @@ function updateLibraryControls() {
   els.movieYearEndFilter.disabled = !hasActiveItems;
   els.metacriticStartFilter.disabled = !hasActiveItems;
   els.metacriticEndFilter.disabled = !hasActiveItems;
+  setGenreFilterDisabled(!hasActiveItems);
   els.copyTitlesButton.disabled = !hasActiveItems;
   els.logCriticScoreButton.disabled = !hasActiveItems;
+}
+
+function itemGenres(item) {
+  if (Array.isArray(item.genres)) {
+    return item.genres.map((genre) => String(genre || "").trim()).filter(Boolean);
+  }
+
+  return String(item.genre || "")
+    .split(",")
+    .map((genre) => genre.trim())
+    .filter(Boolean);
+}
+
+function availableGenres() {
+  return [...new Set(activeLibraryItems().flatMap(itemGenres))].sort((a, b) => a.localeCompare(b));
+}
+
+function selectedGenres() {
+  return [...els.genreOptions.querySelectorAll("input[type='checkbox']:checked")].map((input) => input.value);
+}
+
+function updateGenreFilterSummary() {
+  const count = selectedGenres().length;
+  els.genreFilterCount.textContent = count ? String(count) : "Any";
+}
+
+function updateGenreFilters() {
+  const selected = new Set(selectedGenres());
+  const genres = availableGenres();
+
+  els.genreOptions.replaceChildren(
+    ...genres.map((genre) => {
+      const label = document.createElement("label");
+      label.className = "genre-option";
+
+      const input = document.createElement("input");
+      input.type = "checkbox";
+      input.value = genre;
+      input.checked = selected.has(genre);
+
+      const text = document.createElement("span");
+      text.textContent = genre;
+
+      label.replaceChildren(input, text);
+      return label;
+    }),
+  );
+  updateGenreFilterSummary();
+}
+
+function clearGenreFilters() {
+  els.genreOptions.querySelectorAll("input[type='checkbox']:checked").forEach((input) => {
+    input.checked = false;
+  });
+  updateGenreFilterSummary();
+  renderItems();
 }
 
 function movieYears() {
@@ -544,8 +613,10 @@ function renderItems({ statusPrefix = "" } = {}) {
             ${watched}
           </div>
           ${renderRatingBadges(item)}
+          <button class="media-log-button" type="button">Log row</button>
         </div>
       `;
+      card.querySelector(".media-log-button").addEventListener("click", () => console.log(item));
       return card;
     }),
   );
@@ -558,12 +629,15 @@ function filteredItems() {
   const movieYearEnd = optionalNumber(els.movieYearEndFilter.value);
   const metacriticStart = optionalNumber(els.metacriticStartFilter.value);
   const metacriticEnd = optionalNumber(els.metacriticEndFilter.value);
+  const genres = selectedGenres();
   return state.items.filter((item) => {
     if (item.missingFromLatestScan) return false;
     const year = Number(item.year);
     const metacritic = metacriticScore(item);
+    const itemGenreSet = new Set(itemGenres(item));
     const matchesType = type === "all" || item.type === type;
     const matchesQuery = !query || `${item.title} ${item.year} ${item.library}`.toLowerCase().includes(query);
+    const matchesGenres = !genres.length || genres.some((genre) => itemGenreSet.has(genre));
     const matchesMovieYearStart = item.type !== "movie" || movieYearStart === null || year >= movieYearStart;
     const matchesMovieYearEnd = item.type !== "movie" || movieYearEnd === null || year <= movieYearEnd;
     const matchesMetacriticStart = metacriticStart === null || (metacritic !== null && metacritic >= metacriticStart);
@@ -571,6 +645,7 @@ function filteredItems() {
     return (
       matchesType &&
       matchesQuery &&
+      matchesGenres &&
       matchesMovieYearStart &&
       matchesMovieYearEnd &&
       matchesMetacriticStart &&
@@ -730,6 +805,7 @@ async function signOut() {
   state.items = [];
   updateMovieYearFilters();
   updateMetacriticFilters();
+  updateGenreFilters();
   els.pinBox.classList.add("hidden");
   els.tokenInput.value = "";
   els.librarySummary.textContent = "No library loaded.";
@@ -755,6 +831,7 @@ async function initialize() {
     state.sections = persisted.librarySnapshot.sections || [];
     updateMovieYearFilters();
     updateMetacriticFilters();
+    updateGenreFilters();
     els.librarySummary.textContent = `${activeLibraryItems().length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
   }
 
@@ -809,6 +886,19 @@ els.movieYearStartFilter.addEventListener("change", renderItems);
 els.movieYearEndFilter.addEventListener("change", renderItems);
 els.metacriticStartFilter.addEventListener("change", renderItems);
 els.metacriticEndFilter.addEventListener("change", renderItems);
+els.genreFilter.addEventListener("click", (event) => {
+  if (els.genreFilter.getAttribute("aria-disabled") !== "true") return;
+  event.preventDefault();
+});
+document.addEventListener("click", (event) => {
+  if (!els.genreFilter.open || els.genreFilter.contains(event.target)) return;
+  els.genreFilter.open = false;
+});
+els.genreOptions.addEventListener("change", () => {
+  updateGenreFilterSummary();
+  renderItems();
+});
+els.genreClearButton.addEventListener("click", clearGenreFilters);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
 els.logCriticScoreButton.addEventListener("click", () => {
   fetchOmdbReviews().catch((error) => setStatus(error.message));
