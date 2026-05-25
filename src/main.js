@@ -58,6 +58,8 @@ const els = {
   typeFilter: document.querySelector("#typeFilter"),
   movieYearStartFilter: document.querySelector("#movieYearStartFilter"),
   movieYearEndFilter: document.querySelector("#movieYearEndFilter"),
+  metacriticStartFilter: document.querySelector("#metacriticStartFilter"),
+  metacriticEndFilter: document.querySelector("#metacriticEndFilter"),
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
   logCriticScoreButton: document.querySelector("#logCriticScoreButton"),
 };
@@ -152,6 +154,8 @@ function setConnected(connected) {
   els.typeFilter.disabled = !connected || !hasActiveItems;
   els.movieYearStartFilter.disabled = !connected || !hasActiveItems;
   els.movieYearEndFilter.disabled = !connected || !hasActiveItems;
+  els.metacriticStartFilter.disabled = !connected || !hasActiveItems;
+  els.metacriticEndFilter.disabled = !connected || !hasActiveItems;
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
   els.logCriticScoreButton.disabled = !connected || !hasActiveItems;
 }
@@ -333,6 +337,7 @@ async function loadSectionItems(sections, token, serverUri) {
   });
   updateLibraryControls();
   updateMovieYearFilters();
+  updateMetacriticFilters();
   const activeItemCount = activeLibraryItems().length;
   els.librarySummary.textContent = `${activeItemCount.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
   renderItems({ statusPrefix: "Library loaded and saved in IndexedDB." });
@@ -344,6 +349,8 @@ function updateLibraryControls() {
   els.typeFilter.disabled = !hasActiveItems;
   els.movieYearStartFilter.disabled = !hasActiveItems;
   els.movieYearEndFilter.disabled = !hasActiveItems;
+  els.metacriticStartFilter.disabled = !hasActiveItems;
+  els.metacriticEndFilter.disabled = !hasActiveItems;
   els.copyTitlesButton.disabled = !hasActiveItems;
   els.logCriticScoreButton.disabled = !hasActiveItems;
 }
@@ -375,10 +382,30 @@ function updateMovieYearFilters() {
   if (years.includes(Number(currentEnd))) els.movieYearEndFilter.value = currentEnd;
 }
 
+function updateMetacriticFilters() {
+  const currentStart = els.metacriticStartFilter.value;
+  const currentEnd = els.metacriticEndFilter.value;
+  const scores = Array.from({ length: 101 }, (_, score) => score);
+  const options = [
+    new Option("Any", ""),
+    ...scores.map((score) => new Option(String(score), String(score))),
+  ];
+
+  els.metacriticStartFilter.replaceChildren(...options.map((option) => option.cloneNode(true)));
+  els.metacriticEndFilter.replaceChildren(...options.map((option) => option.cloneNode(true)));
+
+  if (scores.includes(Number(currentStart))) els.metacriticStartFilter.value = currentStart;
+  if (scores.includes(Number(currentEnd))) els.metacriticEndFilter.value = currentEnd;
+}
+
 function filteredResultStatus(filteredCount, statusPrefix = "") {
   const resultNoun = filteredCount === 1 ? "result" : "results";
   const message = `${filteredCount.toLocaleString()} ${resultNoun} after filtering.`;
   return statusPrefix ? `${statusPrefix} ${message}` : message;
+}
+
+function optionalNumber(value) {
+  return value === "" ? null : Number(value);
 }
 
 function formatRatingScore(score, suffix = "") {
@@ -454,6 +481,11 @@ function itemRatings(item) {
   return entries;
 }
 
+function metacriticScore(item) {
+  const score = normalizedRatingFields(item).metacritic;
+  return Number.isFinite(score) ? score : null;
+}
+
 function renderRatingBadges(item) {
   const ratings = itemRatings(item);
   if (!ratings.length) return "";
@@ -522,16 +554,28 @@ function renderItems({ statusPrefix = "" } = {}) {
 function filteredItems() {
   const query = els.searchInput.value.trim().toLowerCase();
   const type = els.typeFilter.value;
-  const movieYearStart = Number(els.movieYearStartFilter.value) || null;
-  const movieYearEnd = Number(els.movieYearEndFilter.value) || null;
+  const movieYearStart = optionalNumber(els.movieYearStartFilter.value);
+  const movieYearEnd = optionalNumber(els.movieYearEndFilter.value);
+  const metacriticStart = optionalNumber(els.metacriticStartFilter.value);
+  const metacriticEnd = optionalNumber(els.metacriticEndFilter.value);
   return state.items.filter((item) => {
     if (item.missingFromLatestScan) return false;
     const year = Number(item.year);
+    const metacritic = metacriticScore(item);
     const matchesType = type === "all" || item.type === type;
     const matchesQuery = !query || `${item.title} ${item.year} ${item.library}`.toLowerCase().includes(query);
-    const matchesMovieYearStart = item.type !== "movie" || !movieYearStart || year >= movieYearStart;
-    const matchesMovieYearEnd = item.type !== "movie" || !movieYearEnd || year <= movieYearEnd;
-    return matchesType && matchesQuery && matchesMovieYearStart && matchesMovieYearEnd;
+    const matchesMovieYearStart = item.type !== "movie" || movieYearStart === null || year >= movieYearStart;
+    const matchesMovieYearEnd = item.type !== "movie" || movieYearEnd === null || year <= movieYearEnd;
+    const matchesMetacriticStart = metacriticStart === null || (metacritic !== null && metacritic >= metacriticStart);
+    const matchesMetacriticEnd = metacriticEnd === null || (metacritic !== null && metacritic <= metacriticEnd);
+    return (
+      matchesType &&
+      matchesQuery &&
+      matchesMovieYearStart &&
+      matchesMovieYearEnd &&
+      matchesMetacriticStart &&
+      matchesMetacriticEnd
+    );
   });
 }
 
@@ -644,6 +688,7 @@ async function signOut() {
   state.sections = [];
   state.items = [];
   updateMovieYearFilters();
+  updateMetacriticFilters();
   els.pinBox.classList.add("hidden");
   els.tokenInput.value = "";
   els.librarySummary.textContent = "No library loaded.";
@@ -668,6 +713,7 @@ async function initialize() {
     state.items = persisted.librarySnapshot.items;
     state.sections = persisted.librarySnapshot.sections || [];
     updateMovieYearFilters();
+    updateMetacriticFilters();
     els.librarySummary.textContent = `${activeLibraryItems().length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
   }
 
@@ -720,6 +766,8 @@ els.searchInput.addEventListener("input", renderItems);
 els.typeFilter.addEventListener("change", renderItems);
 els.movieYearStartFilter.addEventListener("change", renderItems);
 els.movieYearEndFilter.addEventListener("change", renderItems);
+els.metacriticStartFilter.addEventListener("change", renderItems);
+els.metacriticEndFilter.addEventListener("change", renderItems);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
 els.logCriticScoreButton.addEventListener("click", () => {
   logFirstItemCriticScore().catch((error) => setStatus(error.message));

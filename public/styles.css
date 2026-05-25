@@ -277,9 +277,18 @@ select {
 }
 
 .toolbar-actions {
-  display: grid;
-  grid-template-columns: minmax(180px, 240px) minmax(150px, 180px) minmax(260px, auto) auto auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 10px;
+}
+
+.toolbar-actions > input {
+  width: min(240px, 100%);
+}
+
+.toolbar-actions > select {
+  width: min(180px, 100%);
 }
 
 .range-filter {
@@ -416,9 +425,18 @@ select {
 
   .layout,
   .server-card,
-  .toolbar-actions,
   .range-filter {
     grid-template-columns: 1fr;
+  }
+
+  .toolbar-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .toolbar-actions > input,
+  .toolbar-actions > select {
+    width: 100%;
   }
 
   .server-reload-button {

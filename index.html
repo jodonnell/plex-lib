@@ -75,8 +75,18 @@
                 <option value="">Any</option>
               </select>
             </label>
+            <label class="range-filter" aria-label="Metacritic score range">
+              <span>Metacritic between:</span>
+              <select id="metacriticStartFilter" disabled>
+                <option value="">Any</option>
+              </select>
+              <span aria-hidden="true">-</span>
+              <select id="metacriticEndFilter" disabled>
+                <option value="">Any</option>
+              </select>
+            </label>
             <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
-            <button id="logCriticScoreButton" class="secondary-button" type="button" disabled>Log critic score</button>
+            <button id="logCriticScoreButton" class="secondary-button" type="button" disabled>Fetch OMDb reviews</button>
           </div>
         </div>
         <div id="status" class="status">Ready.</div>
