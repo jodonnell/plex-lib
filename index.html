@@ -31,6 +31,13 @@
           </label>
           <button id="tokenButton" class="secondary-button">Use token</button>
         </div>
+        <div class="stack api-key-stack">
+          <label class="field">
+            <span>OMDb API key</span>
+            <input id="omdbApiKeyInput" type="password" autocomplete="off" placeholder="OMDB_API_KEY" />
+          </label>
+          <button id="omdbApiKeyButton" class="secondary-button" type="button">Save OMDb key</button>
+        </div>
         <div id="signedIn" class="stack hidden">
           <p id="authDescription" class="muted">Connected locally. Your token and library cache are kept in this browser.</p>
           <button id="signOutButton" class="secondary-button">Sign out</button>
@@ -69,6 +76,7 @@
               </select>
             </label>
             <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
+            <button id="logCriticScoreButton" class="secondary-button" type="button" disabled>Log critic score</button>
           </div>
         </div>
         <div id="status" class="status">Ready.</div>

@@ -5,20 +5,22 @@ const store = createStore("plex-lib", "app-state");
 const keys = {
   clientId: "clientId",
   token: "token",
+  omdbApiKey: "OMDB_API_KEY",
   servers: "servers",
   selectedServerId: "selectedServerId",
   librarySnapshot: "librarySnapshot",
 };
 
 export async function loadAppState() {
-  const [clientId, token, servers, selectedServerId, librarySnapshot] = await getMany(
-    [keys.clientId, keys.token, keys.servers, keys.selectedServerId, keys.librarySnapshot],
+  const [clientId, token, omdbApiKey, servers, selectedServerId, librarySnapshot] = await getMany(
+    [keys.clientId, keys.token, keys.omdbApiKey, keys.servers, keys.selectedServerId, keys.librarySnapshot],
     store,
   );
 
   return {
     clientId: clientId || "",
     token: token || "",
+    omdbApiKey: omdbApiKey || "",
     servers: Array.isArray(servers) ? servers : [],
     selectedServerId: selectedServerId || "",
     librarySnapshot: librarySnapshot || null,
@@ -31,6 +33,10 @@ export function saveClientId(clientId) {
 
 export function saveToken(token) {
   return set(keys.token, token, store);
+}
+
+export function saveOmdbApiKey(apiKey) {
+  return set(keys.omdbApiKey, apiKey, store);
 }
 
 export function saveServers(servers) {

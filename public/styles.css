@@ -112,6 +112,12 @@ h2 {
   gap: 12px;
 }
 
+.api-key-stack {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line);
+}
+
 .hidden {
   display: none !important;
 }
@@ -272,7 +278,7 @@ select {
 
 .toolbar-actions {
   display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(150px, 190px) minmax(260px, auto) auto;
+  grid-template-columns: minmax(180px, 240px) minmax(150px, 180px) minmax(260px, auto) auto auto;
   gap: 10px;
 }
 

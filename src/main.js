@@ -5,12 +5,15 @@ import {
   fetchResources,
   fetchSections,
   pollPin,
+  POSTER_THUMB_HEIGHT,
+  POSTER_THUMB_WIDTH,
 } from "./browserPlex.js";
 import {
   clearPlexState,
   loadAppState,
   saveClientId,
   saveLibrarySnapshot,
+  saveOmdbApiKey,
   saveSelectedServerId,
   saveServers,
   saveToken,
@@ -19,6 +22,7 @@ import {
 const state = {
   clientId: "",
   token: "",
+  omdbApiKey: "",
   servers: [],
   selectedServer: null,
   items: [],
@@ -36,6 +40,8 @@ const els = {
   signInButton: document.querySelector("#signInButton"),
   tokenButton: document.querySelector("#tokenButton"),
   tokenInput: document.querySelector("#tokenInput"),
+  omdbApiKeyButton: document.querySelector("#omdbApiKeyButton"),
+  omdbApiKeyInput: document.querySelector("#omdbApiKeyInput"),
   signOutButton: document.querySelector("#signOutButton"),
   signedOut: document.querySelector("#signedOut"),
   signedIn: document.querySelector("#signedIn"),
@@ -53,6 +59,7 @@ const els = {
   movieYearStartFilter: document.querySelector("#movieYearStartFilter"),
   movieYearEndFilter: document.querySelector("#movieYearEndFilter"),
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
+  logCriticScoreButton: document.querySelector("#logCriticScoreButton"),
 };
 
 function setStatus(message) {
@@ -75,6 +82,29 @@ function sortLibraryItems(items) {
   return items.sort((a, b) =>
     String(a.sortTitle || a.title || "").localeCompare(String(b.sortTitle || b.title || "")),
   );
+}
+
+function posterImageUrl(thumb) {
+  if (!thumb) return "";
+
+  try {
+    const url = new URL(thumb);
+    if (url.pathname === "/photo/:/transcode") return thumb;
+
+    const token = url.searchParams.get("X-Plex-Token") || activeToken();
+    if (!token) return thumb;
+
+    const endpoint = new URL("/photo/:/transcode", url.origin);
+    endpoint.searchParams.set("width", String(POSTER_THUMB_WIDTH));
+    endpoint.searchParams.set("height", String(POSTER_THUMB_HEIGHT));
+    endpoint.searchParams.set("minSize", "1");
+    endpoint.searchParams.set("upscale", "0");
+    endpoint.searchParams.set("url", url.pathname);
+    endpoint.searchParams.set("X-Plex-Token", token);
+    return endpoint.toString();
+  } catch {
+    return thumb;
+  }
 }
 
 function activeLibraryItems() {
@@ -123,6 +153,7 @@ function setConnected(connected) {
   els.movieYearStartFilter.disabled = !connected || !hasActiveItems;
   els.movieYearEndFilter.disabled = !connected || !hasActiveItems;
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
+  els.logCriticScoreButton.disabled = !connected || !hasActiveItems;
 }
 
 async function startPlexSignIn() {
@@ -153,6 +184,13 @@ async function useToken(token) {
   await saveToken(state.token);
   setConnected(true);
   await loadServers();
+}
+
+async function saveOmdbKey() {
+  state.omdbApiKey = els.omdbApiKeyInput.value.trim();
+  await saveOmdbApiKey(state.omdbApiKey);
+  els.omdbApiKeyInput.value = state.omdbApiKey;
+  setStatus(state.omdbApiKey ? "Saved OMDb API key in IndexedDB." : "Cleared OMDb API key.");
 }
 
 async function loadServers() {
@@ -307,6 +345,7 @@ function updateLibraryControls() {
   els.movieYearStartFilter.disabled = !hasActiveItems;
   els.movieYearEndFilter.disabled = !hasActiveItems;
   els.copyTitlesButton.disabled = !hasActiveItems;
+  els.logCriticScoreButton.disabled = !hasActiveItems;
 }
 
 function movieYears() {
@@ -360,8 +399,9 @@ function renderItems({ statusPrefix = "" } = {}) {
     ...filtered.map((item) => {
       const card = document.createElement("article");
       card.className = "media-card";
-      const poster = item.thumb
-        ? `<img src="${escapeAttr(item.thumb)}" alt="">`
+      const posterUrl = posterImageUrl(item.thumb);
+      const poster = posterUrl
+        ? `<img src="${escapeAttr(posterUrl)}" alt="" loading="lazy" decoding="async">`
         : `<span>${item.type === "movie" ? "Movie" : "TV"}</span>`;
       const watched =
         item.type === "show" && item.leafCount
@@ -412,6 +452,55 @@ async function copyTitles() {
   setStatus(`Copied ${titles.length.toLocaleString()} title${titles.length === 1 ? "" : "s"} to clipboard.`);
 }
 
+async function fetchOmdbMetadata(item) {
+  const endpoint = new URL("https://www.omdbapi.com/");
+  endpoint.searchParams.set("apikey", state.omdbApiKey);
+  endpoint.searchParams.set("plot", "short");
+
+  if (item.imdbId) {
+    endpoint.searchParams.set("i", item.imdbId);
+  } else {
+    endpoint.searchParams.set("t", item.title);
+    if (item.year) endpoint.searchParams.set("y", item.year);
+  }
+
+  const response = await fetch(endpoint);
+  const metadata = await response.json();
+
+  if (!response.ok || metadata.Response === "False") {
+    throw new Error(metadata.Error || `OMDb request failed with status ${response.status}.`);
+  }
+
+  return metadata;
+}
+
+async function logFirstItemCriticScore() {
+  const firstItem = filteredItems()[0];
+
+  if (!state.omdbApiKey) {
+    setStatus("Save an OMDb API key first.");
+    return;
+  }
+
+  if (!firstItem) {
+    setStatus("No title to look up.");
+    return;
+  }
+
+  setStatus(`Fetching OMDb critic score for ${firstItem.title}...`);
+  const metadata = await fetchOmdbMetadata(firstItem);
+  const result = {
+    title: metadata.Title || firstItem.title,
+    year: metadata.Year || firstItem.year || "",
+    imdbId: metadata.imdbID || firstItem.imdbId || "",
+    metascore: metadata.Metascore || "N/A",
+    metadata,
+  };
+
+  console.log("OMDb critic score for first visible item:", result);
+  setStatus(`Logged critic score for ${result.title}: ${result.metascore}.`);
+}
+
 async function signOut() {
   clearInterval(state.polling);
   await clearPlexState();
@@ -436,8 +525,10 @@ async function initialize() {
   if (!persisted.clientId) await saveClientId(state.clientId);
 
   state.token = persisted.token;
+  state.omdbApiKey = persisted.omdbApiKey;
   state.servers = persisted.servers;
   state.selectedServer = state.servers.find((server) => serverId(server) === persisted.selectedServerId) || null;
+  els.omdbApiKeyInput.value = state.omdbApiKey;
 
   if (persisted.librarySnapshot?.items?.length) {
     state.items = persisted.librarySnapshot.items;
@@ -484,6 +575,10 @@ els.tokenButton.addEventListener("click", () => {
   useToken(els.tokenInput.value).catch((error) => setStatus(error.message));
 });
 
+els.omdbApiKeyButton.addEventListener("click", () => {
+  saveOmdbKey().catch((error) => setStatus(error.message));
+});
+
 els.signOutButton.addEventListener("click", () => {
   signOut().catch((error) => setStatus(error.message));
 });
@@ -492,5 +587,8 @@ els.typeFilter.addEventListener("change", renderItems);
 els.movieYearStartFilter.addEventListener("change", renderItems);
 els.movieYearEndFilter.addEventListener("change", renderItems);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
+els.logCriticScoreButton.addEventListener("click", () => {
+  logFirstItemCriticScore().catch((error) => setStatus(error.message));
+});
 
 initialize().catch((error) => setStatus(error.message));

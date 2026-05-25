@@ -1,6 +1,8 @@
 export const APP_NAME = "Plex Library Browser";
 export const PRODUCT_VERSION = "0.1.0";
 export const DEFAULT_PAGE_SIZE = 200;
+export const POSTER_THUMB_WIDTH = 300;
+export const POSTER_THUMB_HEIGHT = 450;
 
 export function createClientId(prefix = "plex-lib") {
   const suffix = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
@@ -168,6 +170,19 @@ export function externalGuid(item, source) {
   );
 }
 
+export function posterThumbnailUrl(serverUri, thumbPath, token) {
+  if (!thumbPath) return "";
+
+  const endpoint = new URL("/photo/:/transcode", serverUri);
+  endpoint.searchParams.set("width", String(POSTER_THUMB_WIDTH));
+  endpoint.searchParams.set("height", String(POSTER_THUMB_HEIGHT));
+  endpoint.searchParams.set("minSize", "1");
+  endpoint.searchParams.set("upscale", "0");
+  endpoint.searchParams.set("url", thumbPath);
+  endpoint.searchParams.set("X-Plex-Token", token);
+  return endpoint.toString();
+}
+
 export function normalizeBrowseItems(body, serverUri, token) {
   return asArray(mediaContainer(body)?.Metadata).map((item) => ({
     id: String(item.ratingKey || item.key || item.guid || item.title),
@@ -186,7 +201,7 @@ export function normalizeBrowseItems(body, serverUri, token) {
     updatedAt: item.updatedAt || "",
     leafCount: item.leafCount || "",
     viewedLeafCount: item.viewedLeafCount || "",
-    thumb: item.thumb ? `${serverUri}${item.thumb}?X-Plex-Token=${encodeURIComponent(token)}` : "",
+    thumb: posterThumbnailUrl(serverUri, item.thumb, token),
     art: item.art ? `${serverUri}${item.art}?X-Plex-Token=${encodeURIComponent(token)}` : "",
   }));
 }
