@@ -8,6 +8,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "deploy": "scripts/deploy.sh",
     "dump:metadata": "node scripts/dump-library-metadata.js",
     "dump:metadata:short": "PLEX_DUMP_SHORT=1 node scripts/dump-library-metadata.js",
     "check": "node --check scripts/dump-library-metadata.js && node --check src/plex.js && node --check src/browserPlex.js && node --check src/storage.js && node --check src/main.js"
