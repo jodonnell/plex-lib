@@ -43,7 +43,6 @@ const els = {
   pinCode: document.querySelector("#pinCode"),
   authLink: document.querySelector("#authLink"),
   authDescription: document.querySelector("#authDescription"),
-  refreshButton: document.querySelector("#refreshButton"),
   servers: document.querySelector("#servers"),
   serverCount: document.querySelector("#serverCount"),
   items: document.querySelector("#items"),
@@ -70,7 +69,6 @@ function setConnected(connected) {
   els.signedOut.classList.toggle("hidden", connected);
   els.signedIn.classList.toggle("hidden", !connected);
   els.authDescription.textContent = "Connected locally. Your token and library cache are kept in this browser's IndexedDB.";
-  els.refreshButton.disabled = !connected;
   els.searchInput.disabled = !connected || !state.items.length;
   els.typeFilter.disabled = !connected || !state.items.length;
   els.copyTitlesButton.disabled = !connected || !state.items.length;
@@ -108,17 +106,16 @@ async function useToken(token) {
 
 async function loadServers() {
   setStatus("Loading Plex servers...");
+  const selectedId = serverId(state.selectedServer);
   state.servers = await fetchResources(activeToken(), state.clientId);
-  state.selectedServer = null;
+  state.selectedServer =
+    state.servers.find((server) => serverId(server) === selectedId) || state.servers[0] || null;
   await saveServers(state.servers);
+  await saveSelectedServerId(serverId(state.selectedServer));
   renderServers();
 
   if (state.servers.length) {
-    try {
-      await selectServer(state.servers[0]);
-    } catch (error) {
-      setStatus(`Found ${state.servers.length} server, but could not load its libraries: ${error.message}`);
-    }
+    setStatus(`Found ${state.servers.length} server${state.servers.length === 1 ? "" : "s"}. Click Reload library to fetch titles.`);
   } else {
     setStatus("No Plex Media Server resources were found for this account.");
   }
@@ -141,20 +138,31 @@ function renderServers() {
   els.servers.replaceChildren(
     ...state.servers.map((server) => {
       const connection = bestConnection(server);
-      const button = document.createElement("button");
-      button.className = `server-button${serverId(state.selectedServer) === serverId(server) ? " active" : ""}`;
-      button.type = "button";
-      button.innerHTML = `
-        <strong>${escapeHtml(server.name || "Unnamed server")}</strong>
-        <span>${escapeHtml(connection?.uri || "No connection")}</span>
+      const isSelected = serverId(state.selectedServer) === serverId(server);
+      const row = document.createElement("div");
+      row.className = `server-card${isSelected ? " active" : ""}`;
+      row.innerHTML = `
+        <button class="server-button" type="button">
+          <strong>${escapeHtml(server.name || "Unnamed server")}</strong>
+          <span>${escapeHtml(connection?.uri || "No connection")}</span>
+        </button>
+        <button class="server-reload-button" type="button">Reload library</button>
       `;
-      button.addEventListener("click", () => selectServer(server));
-      return button;
+      row.querySelector(".server-button").addEventListener("click", () => selectServer(server));
+      row.querySelector(".server-reload-button").addEventListener("click", () => reloadServerLibrary(server));
+      return row;
     }),
   );
 }
 
 async function selectServer(server) {
+  state.selectedServer = server;
+  await saveSelectedServerId(serverId(server));
+  renderServers();
+  setStatus(`Selected ${server.name || "server"}. Click Reload library to fetch titles.`);
+}
+
+async function reloadServerLibrary(server) {
   state.selectedServer = server;
   await saveSelectedServerId(serverId(server));
   renderServers();
@@ -175,7 +183,7 @@ function orderedConnections(server) {
 async function loadLibrary() {
   if (!state.selectedServer) {
     await loadServers();
-    return;
+    if (!state.selectedServer) return;
   }
 
   const token = state.selectedServer.accessToken || activeToken();
@@ -369,7 +377,6 @@ els.tokenButton.addEventListener("click", () => {
 els.signOutButton.addEventListener("click", () => {
   signOut().catch((error) => setStatus(error.message));
 });
-els.refreshButton.addEventListener("click", () => loadLibrary().catch((error) => setStatus(error.message)));
 els.searchInput.addEventListener("input", renderItems);
 els.typeFilter.addEventListener("change", renderItems);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
