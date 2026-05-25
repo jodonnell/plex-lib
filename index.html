@@ -58,6 +58,16 @@
               <option value="movie">Movies</option>
               <option value="show">TV shows</option>
             </select>
+            <label class="range-filter" aria-label="Movie year range">
+              <span>Movies between:</span>
+              <select id="movieYearStartFilter" disabled>
+                <option value="">Any</option>
+              </select>
+              <span aria-hidden="true">-</span>
+              <select id="movieYearEndFilter" disabled>
+                <option value="">Any</option>
+              </select>
+            </label>
             <button id="copyTitlesButton" class="secondary-button" type="button" disabled>Copy titles</button>
           </div>
         </div>

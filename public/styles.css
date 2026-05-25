@@ -272,8 +272,22 @@ select {
 
 .toolbar-actions {
   display: grid;
-  grid-template-columns: minmax(180px, 280px) minmax(150px, 190px) auto;
+  grid-template-columns: minmax(180px, 280px) minmax(150px, 190px) minmax(260px, auto) auto;
   gap: 10px;
+}
+
+.range-filter {
+  display: grid;
+  grid-template-columns: auto minmax(82px, 1fr) auto minmax(82px, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.range-filter select {
+  min-width: 0;
 }
 
 .muted,
@@ -372,7 +386,8 @@ select {
 
   .layout,
   .server-card,
-  .toolbar-actions {
+  .toolbar-actions,
+  .range-filter {
     grid-template-columns: 1fr;
   }
 

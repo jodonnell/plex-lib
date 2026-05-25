@@ -50,6 +50,8 @@ const els = {
   librarySummary: document.querySelector("#librarySummary"),
   searchInput: document.querySelector("#searchInput"),
   typeFilter: document.querySelector("#typeFilter"),
+  movieYearStartFilter: document.querySelector("#movieYearStartFilter"),
+  movieYearEndFilter: document.querySelector("#movieYearEndFilter"),
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
 };
 
@@ -118,6 +120,8 @@ function setConnected(connected) {
   els.authDescription.textContent = "Connected locally. Your token and library cache are kept in this browser's IndexedDB.";
   els.searchInput.disabled = !connected || !hasActiveItems;
   els.typeFilter.disabled = !connected || !hasActiveItems;
+  els.movieYearStartFilter.disabled = !connected || !hasActiveItems;
+  els.movieYearEndFilter.disabled = !connected || !hasActiveItems;
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
 }
 
@@ -290,21 +294,60 @@ async function loadSectionItems(sections, token, serverUri) {
     items: state.items,
   });
   updateLibraryControls();
+  updateMovieYearFilters();
   const activeItemCount = activeLibraryItems().length;
   els.librarySummary.textContent = `${activeItemCount.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
-  setStatus("Library loaded and saved in IndexedDB.");
-  renderItems();
+  renderItems({ statusPrefix: "Library loaded and saved in IndexedDB." });
 }
 
 function updateLibraryControls() {
   const hasActiveItems = Boolean(activeLibraryItems().length);
   els.searchInput.disabled = !hasActiveItems;
   els.typeFilter.disabled = !hasActiveItems;
+  els.movieYearStartFilter.disabled = !hasActiveItems;
+  els.movieYearEndFilter.disabled = !hasActiveItems;
   els.copyTitlesButton.disabled = !hasActiveItems;
 }
 
-function renderItems() {
+function movieYears() {
+  return [
+    ...new Set(
+      activeLibraryItems()
+        .filter((item) => item.type === "movie")
+        .map((item) => Number(item.year))
+        .filter((year) => Number.isInteger(year)),
+    ),
+  ].sort((a, b) => a - b);
+}
+
+function updateMovieYearFilters() {
+  const currentStart = els.movieYearStartFilter.value;
+  const currentEnd = els.movieYearEndFilter.value;
+  const years = movieYears();
+  const options = [
+    new Option("Any", ""),
+    ...years.map((year) => new Option(String(year), String(year))),
+  ];
+
+  els.movieYearStartFilter.replaceChildren(...options.map((option) => option.cloneNode(true)));
+  els.movieYearEndFilter.replaceChildren(...options.map((option) => option.cloneNode(true)));
+
+  if (years.includes(Number(currentStart))) els.movieYearStartFilter.value = currentStart;
+  if (years.includes(Number(currentEnd))) els.movieYearEndFilter.value = currentEnd;
+}
+
+function filteredResultStatus(filteredCount, statusPrefix = "") {
+  const resultNoun = filteredCount === 1 ? "result" : "results";
+  const message = `${filteredCount.toLocaleString()} ${resultNoun} after filtering.`;
+  return statusPrefix ? `${statusPrefix} ${message}` : message;
+}
+
+function renderItems({ statusPrefix = "" } = {}) {
   const filtered = filteredItems();
+
+  if (state.items.length) {
+    setStatus(filteredResultStatus(filtered.length, statusPrefix));
+  }
 
   if (!filtered.length) {
     els.items.className = "grid empty";
@@ -345,11 +388,16 @@ function renderItems() {
 function filteredItems() {
   const query = els.searchInput.value.trim().toLowerCase();
   const type = els.typeFilter.value;
+  const movieYearStart = Number(els.movieYearStartFilter.value) || null;
+  const movieYearEnd = Number(els.movieYearEndFilter.value) || null;
   return state.items.filter((item) => {
     if (item.missingFromLatestScan) return false;
+    const year = Number(item.year);
     const matchesType = type === "all" || item.type === type;
     const matchesQuery = !query || `${item.title} ${item.year} ${item.library}`.toLowerCase().includes(query);
-    return matchesType && matchesQuery;
+    const matchesMovieYearStart = item.type !== "movie" || !movieYearStart || year >= movieYearStart;
+    const matchesMovieYearEnd = item.type !== "movie" || !movieYearEnd || year <= movieYearEnd;
+    return matchesType && matchesQuery && matchesMovieYearStart && matchesMovieYearEnd;
   });
 }
 
@@ -372,6 +420,7 @@ async function signOut() {
   state.selectedServer = null;
   state.sections = [];
   state.items = [];
+  updateMovieYearFilters();
   els.pinBox.classList.add("hidden");
   els.tokenInput.value = "";
   els.librarySummary.textContent = "No library loaded.";
@@ -393,13 +442,17 @@ async function initialize() {
   if (persisted.librarySnapshot?.items?.length) {
     state.items = persisted.librarySnapshot.items;
     state.sections = persisted.librarySnapshot.sections || [];
+    updateMovieYearFilters();
     els.librarySummary.textContent = `${activeLibraryItems().length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
-    setStatus(`Loaded cached library from ${new Date(persisted.librarySnapshot.generatedAt).toLocaleString()}.`);
   }
 
   setConnected(Boolean(state.token));
   renderServers();
-  renderItems();
+  renderItems({
+    statusPrefix: persisted.librarySnapshot?.items?.length
+      ? `Loaded cached library from ${new Date(persisted.librarySnapshot.generatedAt).toLocaleString()}.`
+      : "",
+  });
 
   if (state.token && !state.items.length) {
     await loadServers();
@@ -436,6 +489,8 @@ els.signOutButton.addEventListener("click", () => {
 });
 els.searchInput.addEventListener("input", renderItems);
 els.typeFilter.addEventListener("change", renderItems);
+els.movieYearStartFilter.addEventListener("change", renderItems);
+els.movieYearEndFilter.addEventListener("change", renderItems);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
 
 initialize().catch((error) => setStatus(error.message));
