@@ -28,9 +28,20 @@ const state = {
   items: [],
   sections: [],
   polling: null,
+  filters: null,
 };
 
 const excludedLibraryTitles = new Set(["kids movies", "kids tv shows"]);
+const filterStorageKey = "plex-lib:library-filters";
+const defaultFilters = {
+  query: "",
+  type: "all",
+  movieYearStart: "",
+  movieYearEnd: "",
+  metacriticStart: "",
+  metacriticEnd: "",
+  genres: [],
+};
 
 function isExcludedLibrary(section) {
   return excludedLibraryTitles.has(String(section.title || "").trim().toLowerCase());
@@ -115,6 +126,74 @@ function posterImageUrl(thumb) {
 
 function activeLibraryItems() {
   return state.items.filter((item) => !item.missingFromLatestScan);
+}
+
+function loadSavedFilters() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(filterStorageKey) || "null");
+    if (!saved || typeof saved !== "object") return { ...defaultFilters };
+
+    return {
+      query: typeof saved.query === "string" ? saved.query : defaultFilters.query,
+      type: ["all", "movie", "show"].includes(saved.type) ? saved.type : defaultFilters.type,
+      movieYearStart: typeof saved.movieYearStart === "string" ? saved.movieYearStart : defaultFilters.movieYearStart,
+      movieYearEnd: typeof saved.movieYearEnd === "string" ? saved.movieYearEnd : defaultFilters.movieYearEnd,
+      metacriticStart: typeof saved.metacriticStart === "string" ? saved.metacriticStart : defaultFilters.metacriticStart,
+      metacriticEnd: typeof saved.metacriticEnd === "string" ? saved.metacriticEnd : defaultFilters.metacriticEnd,
+      genres: Array.isArray(saved.genres) ? saved.genres.filter((genre) => typeof genre === "string") : [],
+    };
+  } catch {
+    return { ...defaultFilters };
+  }
+}
+
+function selectOptionIfAvailable(select, value) {
+  if ([...select.options].some((option) => option.value === value)) {
+    select.value = value;
+  }
+}
+
+function applySavedFilters() {
+  const filters = state.filters || defaultFilters;
+
+  els.searchInput.value = filters.query;
+  selectOptionIfAvailable(els.typeFilter, filters.type);
+  selectOptionIfAvailable(els.movieYearStartFilter, filters.movieYearStart);
+  selectOptionIfAvailable(els.movieYearEndFilter, filters.movieYearEnd);
+  selectOptionIfAvailable(els.metacriticStartFilter, filters.metacriticStart);
+  selectOptionIfAvailable(els.metacriticEndFilter, filters.metacriticEnd);
+
+  const genres = new Set(filters.genres);
+  els.genreOptions.querySelectorAll("input[type='checkbox']").forEach((input) => {
+    input.checked = genres.has(input.value);
+  });
+  updateGenreFilterSummary();
+}
+
+function currentFilters() {
+  return {
+    query: els.searchInput.value,
+    type: els.typeFilter.value,
+    movieYearStart: els.movieYearStartFilter.value,
+    movieYearEnd: els.movieYearEndFilter.value,
+    metacriticStart: els.metacriticStartFilter.value,
+    metacriticEnd: els.metacriticEndFilter.value,
+    genres: selectedGenres(),
+  };
+}
+
+function saveFilters() {
+  state.filters = currentFilters();
+  try {
+    localStorage.setItem(filterStorageKey, JSON.stringify(state.filters));
+  } catch {
+    // Keep the in-memory value for this page if localStorage is unavailable.
+  }
+}
+
+function saveFiltersAndRender() {
+  saveFilters();
+  renderItems();
 }
 
 function mergeLibraryItems({ existingItems, freshItems, serverKey, scannedAt }) {
@@ -350,6 +429,7 @@ async function loadSectionItems(sections, token, serverUri) {
   updateMovieYearFilters();
   updateMetacriticFilters();
   updateGenreFilters();
+  applySavedFilters();
   const activeItemCount = activeLibraryItems().length;
   els.librarySummary.textContent = `${activeItemCount.toLocaleString()} titles from ${includedSections.length} movie/show libraries.`;
   renderItems({ statusPrefix: "Library loaded and saved in IndexedDB." });
@@ -393,7 +473,7 @@ function updateGenreFilterSummary() {
 }
 
 function updateGenreFilters() {
-  const selected = new Set(selectedGenres());
+  const selected = new Set(state.filters?.genres || selectedGenres());
   const genres = availableGenres();
 
   els.genreOptions.replaceChildren(
@@ -421,6 +501,7 @@ function clearGenreFilters() {
     input.checked = false;
   });
   updateGenreFilterSummary();
+  saveFilters();
   renderItems();
 }
 
@@ -817,6 +898,7 @@ async function signOut() {
 
 async function initialize() {
   const persisted = await loadAppState();
+  state.filters = loadSavedFilters();
   state.clientId = persisted.clientId || createClientId();
   if (!persisted.clientId) await saveClientId(state.clientId);
 
@@ -835,6 +917,7 @@ async function initialize() {
     els.librarySummary.textContent = `${activeLibraryItems().length.toLocaleString()} cached titles from ${state.sections.length} movie/show libraries.`;
   }
 
+  applySavedFilters();
   setConnected(Boolean(state.token));
   renderServers();
   renderItems({
@@ -880,12 +963,12 @@ els.omdbApiKeyButton.addEventListener("click", () => {
 els.signOutButton.addEventListener("click", () => {
   signOut().catch((error) => setStatus(error.message));
 });
-els.searchInput.addEventListener("input", renderItems);
-els.typeFilter.addEventListener("change", renderItems);
-els.movieYearStartFilter.addEventListener("change", renderItems);
-els.movieYearEndFilter.addEventListener("change", renderItems);
-els.metacriticStartFilter.addEventListener("change", renderItems);
-els.metacriticEndFilter.addEventListener("change", renderItems);
+els.searchInput.addEventListener("input", saveFiltersAndRender);
+els.typeFilter.addEventListener("change", saveFiltersAndRender);
+els.movieYearStartFilter.addEventListener("change", saveFiltersAndRender);
+els.movieYearEndFilter.addEventListener("change", saveFiltersAndRender);
+els.metacriticStartFilter.addEventListener("change", saveFiltersAndRender);
+els.metacriticEndFilter.addEventListener("change", saveFiltersAndRender);
 els.genreFilter.addEventListener("click", (event) => {
   if (els.genreFilter.getAttribute("aria-disabled") !== "true") return;
   event.preventDefault();
@@ -896,6 +979,7 @@ document.addEventListener("click", (event) => {
 });
 els.genreOptions.addEventListener("change", () => {
   updateGenreFilterSummary();
+  saveFilters();
   renderItems();
 });
 els.genreClearButton.addEventListener("click", clearGenreFilters);
