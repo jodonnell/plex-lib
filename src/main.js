@@ -78,6 +78,8 @@ const els = {
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
   logCriticScoreButton: document.querySelector("#logCriticScoreButton"),
   exportLibraryButton: document.querySelector("#exportLibraryButton"),
+  importRatingsButton: document.querySelector("#importRatingsButton"),
+  importRatingsInput: document.querySelector("#importRatingsInput"),
 };
 
 function setStatus(message) {
@@ -244,6 +246,7 @@ function setConnected(connected) {
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
   els.logCriticScoreButton.disabled = !connected || !hasActiveItems;
   els.exportLibraryButton.disabled = !connected || !hasActiveItems;
+  els.importRatingsButton.disabled = !connected || !hasActiveItems;
 }
 
 function setGenreFilterDisabled(disabled) {
@@ -449,6 +452,7 @@ function updateLibraryControls() {
   els.copyTitlesButton.disabled = !hasActiveItems;
   els.logCriticScoreButton.disabled = !hasActiveItems;
   els.exportLibraryButton.disabled = !hasActiveItems;
+  els.importRatingsButton.disabled = !hasActiveItems;
 }
 
 function itemGenres(item) {
@@ -778,6 +782,88 @@ function exportLibrary() {
   setStatus(`Exported ${state.items.length.toLocaleString()} library item${state.items.length === 1 ? "" : "s"} as JSON.`);
 }
 
+function normalizedText(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
+}
+
+function ratingImportKeys(item) {
+  const keys = [];
+  const addKey = (prefix, value) => {
+    const normalized = normalizedText(value);
+    if (normalized) keys.push(`${prefix}:${normalized}`);
+  };
+  const addCompositeKey = (prefix, values) => {
+    const normalizedValues = values.map(normalizedText);
+    if (normalizedValues.every(Boolean)) keys.push(`${prefix}:${normalizedValues.join("|")}`);
+  };
+
+  addKey("cache", item.cacheKey);
+  addKey("imdb", item.imdbId);
+  addKey("tmdb", item.tmdbId);
+  addKey("tvdb", item.tvdbId);
+  addCompositeKey("item", [item.type, item.library, item.id]);
+  addCompositeKey("title", [item.type, item.title, item.year]);
+  return keys;
+}
+
+function libraryItemsFromImport(data) {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  throw new Error("Choose a JSON file exported from this app.");
+}
+
+function importedRatingsByKey(importedItems) {
+  const ratingsByKey = new Map();
+
+  importedItems
+    .filter((item) => item && typeof item === "object" && Object.hasOwn(item, "plexLib"))
+    .forEach((item) => {
+      ratingImportKeys(item).forEach((key) => {
+        if (!ratingsByKey.has(key)) ratingsByKey.set(key, item.plexLib);
+      });
+    });
+
+  return ratingsByKey;
+}
+
+async function importRatingsFile(file) {
+  if (!file) return;
+  if (!state.items.length) {
+    setStatus("Load a library before importing ratings.");
+    return;
+  }
+
+  const importedItems = libraryItemsFromImport(JSON.parse(await file.text()));
+  const ratingsByKey = importedRatingsByKey(importedItems);
+  let mergedCount = 0;
+
+  state.items = state.items.map((item) => {
+    const importedPlexLib = ratingImportKeys(item)
+      .map((key) => ratingsByKey.get(key))
+      .find((plexLib) => plexLib !== undefined);
+    if (importedPlexLib === undefined) return item;
+
+    mergedCount += 1;
+    return {
+      ...item,
+      plexLib: importedPlexLib,
+    };
+  });
+
+  if (!mergedCount) {
+    setStatus("No matching plexLib ratings found in that file.");
+    return;
+  }
+
+  await saveCurrentLibrarySnapshot();
+  updateMetacriticFilters();
+  renderItems({
+    statusPrefix: `Imported ratings for ${mergedCount.toLocaleString()} item${mergedCount === 1 ? "" : "s"}.`,
+  });
+}
+
 async function fetchOmdbMetadata(item) {
   const endpoint = new URL("https://www.omdbapi.com/");
   endpoint.searchParams.set("apikey", state.omdbApiKey);
@@ -1021,6 +1107,13 @@ els.genreOptions.addEventListener("change", () => {
 els.genreClearButton.addEventListener("click", clearGenreFilters);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
 els.exportLibraryButton.addEventListener("click", exportLibrary);
+els.importRatingsButton.addEventListener("click", () => {
+  els.importRatingsInput.value = "";
+  els.importRatingsInput.click();
+});
+els.importRatingsInput.addEventListener("change", () => {
+  importRatingsFile(els.importRatingsInput.files?.[0]).catch((error) => setStatus(error.message));
+});
 els.logCriticScoreButton.addEventListener("click", () => {
   fetchOmdbReviews().catch((error) => setStatus(error.message));
 });
