@@ -77,6 +77,7 @@ const els = {
   genreOptions: document.querySelector("#genreOptions"),
   copyTitlesButton: document.querySelector("#copyTitlesButton"),
   logCriticScoreButton: document.querySelector("#logCriticScoreButton"),
+  exportLibraryButton: document.querySelector("#exportLibraryButton"),
 };
 
 function setStatus(message) {
@@ -242,6 +243,7 @@ function setConnected(connected) {
   setGenreFilterDisabled(!connected || !hasActiveItems);
   els.copyTitlesButton.disabled = !connected || !hasActiveItems;
   els.logCriticScoreButton.disabled = !connected || !hasActiveItems;
+  els.exportLibraryButton.disabled = !connected || !hasActiveItems;
 }
 
 function setGenreFilterDisabled(disabled) {
@@ -446,6 +448,7 @@ function updateLibraryControls() {
   setGenreFilterDisabled(!hasActiveItems);
   els.copyTitlesButton.disabled = !hasActiveItems;
   els.logCriticScoreButton.disabled = !hasActiveItems;
+  els.exportLibraryButton.disabled = !hasActiveItems;
 }
 
 function itemGenres(item) {
@@ -746,6 +749,35 @@ async function copyTitles() {
   setStatus(`Copied ${titles.length.toLocaleString()} title${titles.length === 1 ? "" : "s"} to clipboard.`);
 }
 
+function filenameSafe(value) {
+  const filename = String(value || "plex-library")
+    .trim()
+    .toLowerCase()
+    .replaceAll(/[^a-z0-9]+/g, "-")
+    .replaceAll(/^-|-$/g, "");
+  return filename || "plex-library";
+}
+
+function exportLibrary() {
+  if (!state.items.length) {
+    setStatus("No library to export.");
+    return;
+  }
+
+  const snapshot = currentLibrarySnapshot();
+  const blob = new Blob([`${JSON.stringify(snapshot, null, 2)}\n`], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  const date = new Date().toISOString().slice(0, 10);
+  link.href = url;
+  link.download = `${filenameSafe(snapshot.serverName)}-${date}.json`;
+  document.body.append(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+  setStatus(`Exported ${state.items.length.toLocaleString()} library item${state.items.length === 1 ? "" : "s"} as JSON.`);
+}
+
 async function fetchOmdbMetadata(item) {
   const endpoint = new URL("https://www.omdbapi.com/");
   endpoint.searchParams.set("apikey", state.omdbApiKey);
@@ -794,14 +826,18 @@ function normalizeOmdbRatings(ratings) {
   }, {});
 }
 
-async function saveCurrentLibrarySnapshot() {
-  await saveLibrarySnapshot({
+function currentLibrarySnapshot() {
+  return {
     generatedAt: new Date().toISOString(),
     serverId: serverId(state.selectedServer),
     serverName: state.selectedServer?.name || "",
     sections: state.sections,
     items: state.items,
-  });
+  };
+}
+
+async function saveCurrentLibrarySnapshot() {
+  await saveLibrarySnapshot(currentLibrarySnapshot());
 }
 
 function delay(ms) {
@@ -984,6 +1020,7 @@ els.genreOptions.addEventListener("change", () => {
 });
 els.genreClearButton.addEventListener("click", clearGenreFilters);
 els.copyTitlesButton.addEventListener("click", () => copyTitles().catch((error) => setStatus(error.message)));
+els.exportLibraryButton.addEventListener("click", exportLibrary);
 els.logCriticScoreButton.addEventListener("click", () => {
   fetchOmdbReviews().catch((error) => setStatus(error.message));
 });
